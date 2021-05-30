@@ -1,4 +1,5 @@
 # the keynotes from me
 
-* red vs blue for containerized application
+* Red vs Blue for containerized application
 * Attack in a Service Mesh
+* Attack Cloud Native Kubernetes
