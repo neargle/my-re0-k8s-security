@@ -2,4 +2,4 @@
 
 * Red vs Blue for containerized application
 * Attack in a Service Mesh
-* Attack Cloud Native Kubernetes
+* Attack Cloud Native Kubernetes (Cocreater: @cdxy)
