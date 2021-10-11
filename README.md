@@ -4,6 +4,8 @@
 
 * [Also a Awesome BugBounty Tool for Cloud Platform](https://github.com/neargle/slidefiles/blob/main/2021%20WHC2021%20CDK-Also-a-Awesome-BugBounty-Tool-for-Cloud-Platform.pptx.pdf)
 
+(co-speaker @cxdy)
+
 ## WHC2021 - 多租户容器集群权限提升的攻防对抗
 
 * [封闭中](https://github.com/neargle/slidefiles/blob/main/2021%20WHC2021%20CDK-Also-a-Awesome-BugBounty-Tool-for-Cloud-Platform.pptx.pdf)
