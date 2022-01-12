@@ -1,5 +1,16 @@
 # My Slide Files
 
+## TSRC BGF 2021 - A Bugbounty Story of “Cloud-Native”
+
+* [A Bugbounty Story of “Cloud-Native”](https://github.com/neargle/slidefiles/blob/main/%5BTSRC%20BGF%202021%5D%20A%20Bugbounty%20Story%20of%20%E2%80%9CCloud-Native%E2%80%9D.pptx.pdf)
+
+(co-speaker @lazydog)
+
+## Kubecon & CloudNativeCon - Redteam Views: Security Practice of K8s Cluster Administrator
+
+* [封闭中](https://github.com/neargle/slidefiles/blob/main/%5BTSRC%20BGF%202021%5D%20A%20Bugbounty%20Story%20of%20%E2%80%9CCloud-Native%E2%80%9D.pptx.pdf)
+
+
 ## WHC2021 - Also a Awesome BugBounty Tool for Cloud Platform
 
 * [Also a Awesome BugBounty Tool for Cloud Platform](https://github.com/neargle/slidefiles/blob/main/2021%20WHC2021%20CDK-Also-a-Awesome-BugBounty-Tool-for-Cloud-Platform.pptx.pdf)
