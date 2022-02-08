@@ -8,7 +8,7 @@
 
 ## Kubecon & CloudNativeCon - Redteam Views: Security Practice of K8s Cluster Administrator
 
-* [封闭中](https://github.com/neargle/slidefiles/blob/main/%5BTSRC%20BGF%202021%5D%20A%20Bugbounty%20Story%20of%20%E2%80%9CCloud-Native%E2%80%9D.pptx.pdf)
+* [Redteam Views: Security Practice of K8s Cluster Administrator](https://github.com/neargle/slidefiles/blob/main/CNCF%20KubeCon%20%26%20CloudNativeCon%20-%20Redteam%20Views%20Security%20Practice%20of%20K8s%20Cluster%20Administrator.pdf)
 
 
 ## WHC2021 - Also a Awesome BugBounty Tool for Cloud Platform
