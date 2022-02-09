@@ -23,13 +23,13 @@
 
 ## HITB2021 - Attack Cloud Native Kubernetes 
 
-(co-speaker @cxdy)
+(co-speaker @cdxy)
 
 * [Attack Cloud Native Kubernetes](https://github.com/neargle/slidefiles/blob/main/2021%20HITB%20-%20Attack%20Cloud%20Native%20Kubernetes.pdf)
 
 ## BlackHat ASIA 2021 Arsenal - Zero Dependency Container Penetration Toolkit
 
-(co-speaker @cxdy)
+(co-speaker @cdxy)
 
 * [Zero Dependency Container Penetration Toolkit](https://github.com/neargle/slidefiles/blob/main/2021%20BlackHat%20ASIA%20Arsenal%20-%20Zero%20Dependency%20Container%20Penetration%20Toolkit.pdf)
 
