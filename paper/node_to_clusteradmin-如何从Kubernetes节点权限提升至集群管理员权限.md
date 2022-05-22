@@ -1,9 +1,9 @@
 # 如何从 Kubernetes 节点权限提升至集群管理员权限？
 
-我有幸参加了去年的 KubeCon 并分享议题，议题的其中一个攻防案例讲述了如何从一个边缘业务的开发者权限逐步提升至 Kubernetes 集群管理员权限；其中最后一步的手法，是描述关于节点上利用 DaemonSet 和 Pod 上的 ServiceAccount token 进行提权，那一年我在补天上的议题也简述了这个手法。在今年的 KubeCon 欧洲上，这样的攻击手法被命名为了"蹦床"，快速过完国外的这篇 slide 之后，深感他们研究的细致和用心，对比我去年的形色匆匆熬夜赶稿，他们倾注了更多的时间和资源，完成了我的很多遗憾和不甘；也让我重拾了这块研究的很多记忆。
+我有幸参加了去年的 KubeCon 并分享议题，议题的其中一个攻防案例讲述了如何从一个边缘业务的开发者权限逐步提升至 Kubernetes 集群管理员权限；其中最后一步的手法，是描述关于节点上利用 DaemonSet 和 Pod 上的 ServiceAccount token 进行提权，那一年我在补天上的议题也简述了这个手法。在今年的 KubeCon 欧洲上，这样的攻击手法被命名为了"蹦床"。快速过完国外的这篇 slide 之后，深感他们研究的细致和用心，对比我去年的形色匆匆熬夜赶稿，他们倾注了更多的时间和资源，完成了我的很多遗憾和不甘；也让我重拾了这块研究的很多记忆。
 诶，很多TIPS捂着捂着就捂坏了，再熬夜通宵写完这篇稿子吧。
 
-以下内容和此前我在师傅们的星球发的内容并无二致，我把历史上这块相关的分享都汇总到了 https://github.com/neargle/my-re0-k8s-security , 用于知识整理、勘误和迭代，用来避免各平台不方便修改内容的问题。
+以下内容和此前我在师傅们的星球发的内容并无二致，我把历史上这块相关的分享都汇总到了 [https://github.com/neargle/my-re0-k8s-security](https://github.com/neargle/my-re0-k8s-security) , 用于知识整理、勘误和迭代，用来避免各平台不方便修改内容的问题。
 
 ## Kubernetes集群下的横向移动
 
@@ -27,14 +27,14 @@
 
 不过其实大部分情况下，红队无需了解 ServiceAccount 也能完成横向移动目标。现在的集群管理员有很多坏毛病，比如有些集群管理员会在每个节点的 ~/.kube/config 或其他目录放置集群管理员的 kubeconfig 文件方便运维；只要 find 一下，我们就能获取 Kubernetes 的集群管理员权限。
 
-同时，如果集权管理员不遵守节点上的运维规范，传统的横向移动手段也依然适用，包括但不限于：
+同时，如果集群管理员不遵守节点上的运维规范，传统的横向移动手段也依然适用，包括但不限于：
 * 服务器上监听的端口存在RCE漏洞
 * 节点上放置了可以登录其他服务器的 SSH 私钥
 * 获取 SSH 密码，如 本地信息收集、strace、sudo钓鱼等
 * 节点 Agent 的漏洞挖掘
 * 用漏洞攻击自动化运维管控系统、跳板机、堡垒机、密码库、发布平台等
 
-当然，Kubernetes集群对于攻防来说，最大的变化之一就是把业务和应用的可执行能力，从服务器上限制到一个个POD中，业务代码和运维原则上并不会拥有控制节点的能力，也无法影响到节点服务器。所以，如果是标准且原生的线上集群，集群管理员是不会登录到各个节点上进行运维的，也不会留下很多痕迹和攻击入口。
+当然，Kubernetes集群对于攻防来说，最大的变化之一就是：把业务和应用的可执行能力从服务器上限制到一个个 POD 中，业务代码和业务运维原则上不会拥有控制节点的能力，也无法影响到节点服务器。所以，如果是标准且原生的线上集群，集群管理员是不会登录到各个节点上进行运维的，也不会留下很多痕迹和攻击入口。
 
 ## DaemonSet 和 ServiceAccount
 
@@ -70,11 +70,11 @@ template:
       name: root
 ```
 
-注：该 DaemonSet 会删除集群下所有节点上 root 用户的 SSH 私钥（默认路径下）。
+注：该 DaemonSet 会删除当前集群里所有节点上 root 用户的 SSH 私钥（默认路径下）。
 
-**2、每个 POD 在新建时都会绑定一个 ServiceAccount，每个 ServiceAccount 可以拥有一个或多个 Secret，默认存放在容器里的 /var/run/secrets/kubernetes.io/serviceaccount 目录下。**
+**2、每个 POD 在新建时都会绑定一个 ServiceAccount，每个 ServiceAccount 默认绑定了 Secret，默认存放在容器里的 /var/run/secrets/kubernetes.io/serviceaccount 目录下。**
 
-那么，假如集群管理员给一个 DaemonSet 绑定了一个 ServiceAccount，并修改这个 ServiceAccount 的 RBAC 设置，给他等同于 Cluster Admin 的权限。
+假如集群管理员给一个 DaemonSet 绑定了一个 ServiceAccount，并修改这个 ServiceAccount 的 RBAC 设置，给他等同于 Cluster Admin 的权限。
 
 那么，当我们控制了一台节点服务器时，由于 DeamonSet 会在每一台节点服务器上创建一个 POD 副本，所以无论我们控制了集群中的哪一台服务器，都可以提升至集群管理员的权限，也等于可以控制当前集群下所有节点的服务器，可控集群里的任意资源了。
 
@@ -84,7 +84,7 @@ template:
 
 ![](mdimg/20220522224228.png)  
 
-我在 KubeCon 分享的案例就是类似的情况，当我们通过容器逃逸获取了一台服务器的权限后，我们发现这台服务器上很多有趣的情况：
+我在 KubeCon 分享的案例就是类似的情况，当我们通过容器逃逸获取了一台服务器的权限后，我们发现这台服务器是一台比较标准的 Kubernetes 节点：
 * 这台服务器只有一条远久的 SSH 登录记录
 * 节点上的 history 等日志文件少得可怜，几乎没有什么有用信息
 * 节点上的秘钥文件已经全部被清理
@@ -113,7 +113,7 @@ template:
 
 最终我们发现其中一个 DaemonSet: 安全 Agent，其配置文件里给 ServiceAccount 设置了 RBAC 权限，绑定了一个权限较大的 Cluster role，并且可以 list 和 get secret 信息。虽然，其他 DaemonSet 的 ServiceAccount 也设置了不同 RBAC 权限，但当我们拥有了 kube-system 命名空间下的 Secret 权限时，我们就等同拥有了 K8s Cluster Admin 的权限。也由于我们本次的靶标在集群内，所以最终我们达成了目标。
 
-（画外音：这个 DaemonSet 还配置了很多重复且杂七杂八的 Capability，安全 Agent 配置特定的 Capability 来提升权限并不少见，但研发者可能并不能很好的把握每个 Capability 的作用，有些甚至配置了特权容器以求方便。由于 DaemonSet 的配置不会经由 PodSecurityPolicy 或 K8s Admission Webhook 所限制，权限过大和权限滥用的情况还是比较多的，建议集群管理员也注意此处的权限收敛。
+（画外音：这个 DaemonSet 还配置了很多重复且杂七杂八的 Capability，安全 Agent 配置特定的 Capability 来提升权限并不少见，但研发者可能并不能很好的把握每个 Capability 的作用，有些甚至配置了特权容器以求方便。由于 DaemonSet 的配置一般不会经由 PodSecurityPolicy 或 K8s Admission Webhook 所限制，权限过大和权限滥用的情况还是比较多的，建议集群管理员也注意此处的权限收敛。
 
 这里红队朋友们可以使用一条简单的命令来测试当前的服务器上的所有容器的 ServiceAccount 是否拥有列举 Secret 的权限，比较好的方式是使用 kubectl auth can-i 来检测，但节点和POD上一般不安装 kubectl，所以我更倾向用 curl 进行简单测试。
 
@@ -133,9 +133,9 @@ docker ps | grep -v "/pause" | awk -F" " '{print $1}' | grep -v CONTAINER | whil
 
 ![](mdimg/20220523002153.png)  
 
-这块也是我去年的意难平呀，可惜当时没钱也没时间搞，其实是一个很不错的 bugbounty IDEA。国内的平台估计也会有同样的问题，不过国内的漏洞赏金计划对集群内的权限提升问题并不关注，所以给到的奖励会比较有限，我就不一一去测了；如果那家的师傅觉得可以给到不错的赏金可以和我说一下，我来试试看能不能找到可以提权的点。
+这块也是我去年的意难平呀，可惜当时没钱也没时间搞，其实是一个很不错的 bugbounty IDEA。国内的平台估计也会有同样的问题，不过国内的漏洞赏金计划对集群内的权限提升问题并不关注，所以给到的奖励会很有限，我就不一一去测了；如果那家的师傅觉得可以给到不错的赏金可以和我说一下，我来试试看能不能找到可以提权的点。
 
-我历史的PPT可以在 https://github.com/neargle/my-re0-k8s-security/tree/main/slide 查看，我把 Palo Alto Networks PPT 也附在文末了，大家可以参考。
+本文提到的我历史的PPT可以在 https://github.com/neargle/my-re0-k8s-security/tree/main/slide 查看，我把 Palo Alto Networks PPT 也附在文末了，大家可以参考。第三方的PPT我就不放 Github了，有点侵权。
 
 除了 CNI 插件和安全组件，日志组件的 DaemonSet 默认配置也经常配置过大的权限和挂载过大的目录，如很多人使用 filebeat 配置：
 
@@ -200,4 +200,4 @@ spec:
           path: /
 ```
 
-归根结底，还是最小权限原则的问题。老生常谈了，但在 Kubernetes 的实践里却又有很多新的东西需要安全从业者们去把握。
+归根结底，还是最小权限原则的问题。老生常谈了，但在 Kubernetes 的实践里却又有很多新的东西需要安全从业者们去把握。这里还是有挺多有趣的点的，希望还有机会和大家聊聊。
