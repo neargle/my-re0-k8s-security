@@ -3,10 +3,17 @@
 
 本材料基于我原先在腾讯发表的博客 **《红蓝对抗中的云原生漏洞挖掘及利用实录》** 进行持续更新和完善，用于解决公众号无法及时勘误和调整的局限性；且由于Kubernetes安全特性、容器安全等场景的攻防技术在不断发展和改变，文章的内容也会持续不断的进行调整；并在后续会补充从零开始的实验环境搭建、Kubernetes安全特性对抗、完整红蓝对抗案例、EBPF安全等相关的内容。希望整理和囊括我在Kubecon、CloudNativeCon、HITB、BlackHat、WHC、CIS等会议上分享的云原生安全相关的议题，以及此前写过的所有相关文章；希望重新构建和整理自己的在 Kubernetes 上的知识体系。
 
-目录包括[WIP]：
+文件包括[WIP]：
 1. [PAPER](./paper/) - 近期写的文章和白皮书汇总
 2. [SLIDE](./slide/) - 近期发表的议题材料
 3. [GIST](./gist/) - 文章和议题所用到的代码
+
+|Security Conference|CNCF & Linux Foundation|
+|-|-|
+|<img src="./mdimg/20220521123149.png" height="45"> <img src="./mdimg/20220521122243.png" height="45"> <img src="./mdimg/20220521230036.png" height="45"> <img src="./mdimg/20220521225818.png" height="45">|<img src="./mdimg/20220521115419.png" height="45">|
+|HITB、 BlackHat、 WHC、CIS ...|Kubecon & CloudNativeCon ...|
+<table> 
+
 
 ## 0. 目录
 
