@@ -528,7 +528,47 @@ https://github.com/cdk-team/CDK/wiki/Exploit:-shim-pwn
 
 这些漏洞的 POC 和 EXP 都已经公开，且不乏有利用行为，但同时大部分的 EDR 和 HIDS 也对 EXP 的利用具有检测能力，这也是利用内核漏洞进行容器逃逸的痛点之一。
 
-## 6. 容器相关组件的历史漏洞**
+## 5.10. 写 StaticPod 逃逸或权限维持
+
+利用 Static Pod 是我们在容器逃逸和远程代码执行场景找到的解决方案，他是 Kubernetes 里的一种特殊的 Pod，由节点上 kubelet 进行管理。在漏洞利用上有以下几点明显的优势：
+
+1、 仅依赖于 kubelet
+
+Static Pod 仅依赖 kubelet，即使 K8s 的其他组件都奔溃掉线，删除 apiserver，也不影响 Static Pod 的使用。在 Kubernetes 已经是云原生技术事实标准的现在，kubelet 几乎运行与每个容器母机节点之上。
+
+2、 配置目录固定
+
+Static Pod 配置文件写入路径由 kubelet config 的 staticPodPath 配置项管理，默认为 /etc/kubernetes/manifests 或 /etc/kubelet.d/，一般情况不做更改。
+
+3、 执行间隔比 Cron 更短
+
+通过查看 Kubernetes 的源码，我们可以发现 kubelet 会每 20 秒监控新的 POD 配置文件并运行或更新对应的 POD；由 `c.FileCheckFrequency.Duration = 20 * time.Second` 控制，虽然 Cron 的每分钟执行已经算是非常及时，但 Static Pod 显然可以让等待 shell 的时间更短暂，对比 /etc/cron.daily/* ， /etc/cron.hourly/* ， /etc/cron.monthly/* ， /etc/cron.weekly/* 等目录就更不用说了。
+
+另外，Cron 的分钟级任务也会遇到重复多次执行的问题，增加多余的动作更容易触发 IDS 和 IPS，而 Static Pod 若执行成功就不再调用，保持执行状态，仅在程序奔溃或关闭时可自动重启
+
+4、 进程配置更灵活
+
+Static Pod 支持 Kubernetes POD 的所有配置，等于可以运行任意配置的容器。不仅可以配置特权容器和 HostPID 使用 nscenter 直接获取容器母机权限；更可以配置不同 namespace、capabilities、cgroup、apparmor、seccomp 用于特殊的需求。
+
+灵活的进程参数和 POD 配置使得 Static Pod 有更多方法对抗 IDS 和 IPS，因此也延生了很多新的对抗手法，这里就不再做过多介绍。
+
+5、 检测新文件或文件变化的逻辑更通用
+
+最重要的是，Static Pod 不依赖于 st_mtime 逻辑，也无需设置可执行权限，新文件检测逻辑更加通用。
+
+```
+func (s *sourceFile) extractFromDir(name string) ([]*v1.Pod, error) {
+    dirents, err := filepath.Glob(filepath.Join(name, "[^.]*"))
+    if err != nil {
+        return nil, fmt.Errorf("glob failed: %v", err)
+    }
+    pods := make([]*v1.Pod, 0, len(dirents))
+
+```
+
+而文件更新检测是基于 kubelet 维护的 POD Hash 表进行的，配置的更新可以很及时和确切的对 POD 容器进行重建。Static Pod 甚至包含稳定完善的奔溃重启机制，由 kubelet 维护，属于 kubelet 的默认行为无需新加配置。操作系统层的痕迹清理只需删除 Static Pod YAML 文件即可，kubelet 会自动移除关闭运行的恶意容器。同时，对于不了解 Static Pod 的蓝队选手来说，我们需要注意的是，使用 `kubectl delete` 删除恶意容器或使用 `docker stop` 关闭容器都无法完全清除 Static Pod 的恶意进程，kubelet 会守护并重启该 Pod。
+
+## 6. 容器相关组件的历史漏洞
 
 2020 年我们和腾讯云的同学一起处理跟进分析了多个官方开源分支所披露的安全问题，并在公司内外的云原生能力上进行复现、分析，从产品和安全两个角度出发探讨攻击场景，保障云用户和业务的安全。  
 
