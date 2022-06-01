@@ -17,48 +17,50 @@
 
 ## 0. 目录
 
-  - [0. 目录](#0-目录)
-  - [0.5 测试环境建议](#05-测试环境建议)
-  - [1. 背景](#1-背景)
-  - [2. 攻防演练中的云原生安全](#2-攻防演练中的云原生安全)
-  - [3. 单容器环境内的信息收集](#3-单容器环境内的信息收集)
-  - [4. 容器网络](#4-容器网络)
-  - [5. 关于逃逸的那些事](#5-关于逃逸的那些事)
-  	- [5.1. privileged 容器内 mount device](#51-privileged-容器内-mount-device)
-  	- [5.2. 攻击 lxcfs](#52-攻击-lxcfs)
-  	- [5.3. 创建 cgroup 进行容器逃逸](#53-创建-cgroup-进行容器逃逸)
-  	- [5.4. 特殊路径挂载导致的容器逃逸](#54特殊路径挂载导致的容器逃逸)
-  	- [5.4.1 Docker in Docker](#541-docker-in-docker)
-  	- [5.4.2 攻击挂载了主机 /proc 目录的容器](#542-攻击挂载了主机-proc-目录的容器)
-  	- [5.5. SYS_PTRACE 安全风险](#55-sys_ptrace-安全风险)
-  	- [5.6. 利用大权限的 Service Account](#56-利用大权限的-service-account)
-  	- [5.7. CVE-2020-15257 利用](#57-cve-2020-15257-利用)
-  	- [5.8. runc CVE-2019-5736 和容器组件历史逃逸漏洞综述](#58-runc-cve-2019-5736-和容器组件历史逃逸漏洞综述)
-  	- [5.9. 内核漏洞提权和逃逸概述](#59-内核漏洞提权和逃逸概述)
-  - [6. 容器相关组件的历史漏洞**](#6-容器相关组件的历史漏洞)
-  - [7. 容器、容器编排组件 API 配置不当或未鉴权](#7-容器容器编排组件-api-配置不当或未鉴权)
-  	- [7.1. 组件分工](#71-组件分工)
-  	- [7.2. apiserver](#72apiserver)
-  	- [7.3. kubelet](#73-kubelet)
-  	- [7.4. dashboard](#74-dashboard)
-  	- [7.5. etcd](#75-etcd)
-  	- [7.6. docker remote api](#76-docker-remote-api)
-  	- [7.7. kubectl proxy](#77-kubectl-proxy)
-  - [8. 容器镜像安全问题](#8-容器镜像安全问题)
-  - [9. 二次开发所产生的安全问题](#9-二次开发所产生的安全问题)
-  	- [9.1. 对 Kubernetes API 的请求转发或拼接](#91-对-kubernetes-api-的请求转发或拼接)
-  - [10. Serverless](#10-serverless)
-  	- [10.1. 文件驻留导致命令执行](#101-文件驻留导致命令执行)
-  	- [10.2. 攻击公用容器 / 镜像](#102-攻击公用容器--镜像)
-  - [11. DevOps](#11-devops)
-  - [12. 云原生 API 网关](#12-云原生-api-网关)
-  	- [12.1. APISIX 的 RCE 利用](#121-apisix-的-rce-利用)
-  - [13. 其它利用场景和手法](#13-其它利用场景和手法)
-  	- [13.1. 从 CronJob 谈持久化](#131-从-cronjob-谈持久化)
-  - [14. 致谢](#14-致谢)
-  - [15. 引用](#15-引用)
+- [从零开始的Kubernetes攻防](#从零开始的kubernetes攻防)
+	- [0. 目录](#0-目录)
+		- [0.5 测试环境建议](#05-测试环境建议)
+	- [1. 背景](#1-背景)
+	- [2. 攻防演练中的云原生安全](#2-攻防演练中的云原生安全)
+	- [3. 单容器环境内的信息收集](#3-单容器环境内的信息收集)
+	- [4. 容器网络](#4-容器网络)
+	- [5. 关于逃逸的那些事](#5-关于逃逸的那些事)
+		- [5.1. privileged 容器内 mount device](#51-privileged-容器内-mount-device)
+		- [5.2. 攻击 lxcfs](#52-攻击-lxcfs)
+		- [5.3. 创建 cgroup 进行容器逃逸](#53-创建-cgroup-进行容器逃逸)
+		- [5.4. 特殊路径挂载导致的容器逃逸](#54特殊路径挂载导致的容器逃逸)
+		- [5.4.1 Docker in Docker](#541-docker-in-docker)
+		- [5.4.2 攻击挂载了主机 /proc 目录的容器](#542-攻击挂载了主机-proc-目录的容器)
+		- [5.5. SYS_PTRACE 安全风险](#55-sys_ptrace-安全风险)
+		- [5.6. 利用大权限的 Service Account](#56-利用大权限的-service-account)
+		- [5.7. CVE-2020-15257 利用](#57-cve-2020-15257-利用)
+		- [5.8. runc CVE-2019-5736 和容器组件历史逃逸漏洞综述](#58-runc-cve-2019-5736-和容器组件历史逃逸漏洞综述)
+		- [5.9. 内核漏洞提权和逃逸概述](#59-内核漏洞提权和逃逸概述)
+		- [5.10. 写 StaticPod 逃逸或权限维持](#510-写-staticpod-逃逸或权限维持)
+	- [6. 容器相关组件的历史漏洞](#6-容器相关组件的历史漏洞)
+	- [7. 容器、容器编排组件 API 配置不当或未鉴权](#7-容器容器编排组件-api-配置不当或未鉴权)
+		- [7.1. 组件分工](#71-组件分工)
+		- [7.2. apiserver](#72apiserver)
+		- [7.3. kubelet](#73-kubelet)
+		- [7.4. dashboard](#74-dashboard)
+		- [7.5. etcd](#75-etcd)
+		- [7.6. docker remote api](#76-docker-remote-api)
+		- [7.7. kubectl proxy](#77-kubectl-proxy)
+	- [8. 容器镜像安全问题](#8-容器镜像安全问题)
+	- [9. 二次开发所产生的安全问题](#9-二次开发所产生的安全问题)
+		- [9.1. 对 Kubernetes API 的请求转发或拼接](#91-对-kubernetes-api-的请求转发或拼接)
+	- [10. Serverless](#10-serverless)
+	- [10.1. 文件驻留导致命令执行](#101-文件驻留导致命令执行)
+	- [10.2. 攻击公用容器 / 镜像](#102-攻击公用容器--镜像)
+	- [11. DevOps](#11-devops)
+	- [12. 云原生 API 网关](#12-云原生-api-网关)
+	- [12.1. APISIX 的 RCE 利用](#121-apisix-的-rce-利用)
+	- [13. 其它利用场景和手法](#13-其它利用场景和手法)
+	- [13.1. 从 CronJob 谈持久化](#131-从-cronjob-谈持久化)
+	- [14. 致谢](#14-致谢)
+	- [15. 引用](#15-引用)
 
-## 0.5 测试环境建议
+### 0.5 测试环境建议
 
 测试环境的所有问题钱都能解决，我们可以直接在云厂商上购买一个包含多节点的 Kubernetes 容器集群；但如果只有一台VPS服务器或配置有限的虚拟机环境，那么我建议可以使用 minikube、kind 或 K3s 等工具来搭建一个 Kubernetes 容器集群进行测试。
 
@@ -245,7 +247,7 @@ kubectl create -f cronjob.yaml -v=8
 
 我们来一一看一下利用场景和方法：  
 
-## 5.1. privileged 容器内 mount device
+### 5.1. privileged 容器内 mount device
 
 使用 privileged 特权容器是业界最常见以及最广为人知的逃逸手法，对容器安全有一定要求的产品一般都会严格限制特权容器的使用和监控。不过依然会有一些著名的云产品犯类似的低级错误，例如微软的 Azure 出现的问题：  
 
@@ -269,7 +271,7 @@ fdisk -l
 
 当然这类的文件的读写是 EDR 和 HIDS 重点监控的对象，所以是极易触发告警的；即使 HIDS 不一定有针对容器安全的特性进行优化，对此类的逃逸行为依旧有一些检测能力。
 
-## 5.2. 攻击 lxcfs
+### 5.2. 攻击 lxcfs
 
 lxcfs 的场景和手法应该是目前业界 HIDS 较少进行覆盖的，我们目前也未在真实的攻防场景中遇到 lxcfs 所导致的容器逃逸利用，学习到这个有趣的场景主要还是来自于 @lazydog 师傅在开源社区和私聊里的分享，他在自己的实际蓝军工作中遇到了 lxcfs 的场景，并调研文档和资料构建了一套相应的容器逃逸思路；由此可见，这个场景和手法在实际的攻防演练中也是非常有价值的。
 
@@ -313,7 +315,7 @@ https://github.com/cdk-team/CDK/wiki/Exploit:-lxcfs-rw
 
 逃逸章节所使用的技巧很多都在 CDK 里有自动化的集成和实现。
 
-## 5.3. 创建 cgroup 进行容器逃逸
+### 5.3. 创建 cgroup 进行容器逃逸
 
 上面提到了 privileged 配置可以理解为一个很大的权限集合，可以直接 mount device 并不是它唯一的权限和利用手法，另外一个比较出名的手法就是利用 cgroup release_agent 进行容器逃逸以在宿主机执行命令，这个手法同样可以作用于 sys_admin 的容器。
 
@@ -360,7 +362,7 @@ debugfs -w near
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSft26N0dJav4icNaXnENfhzLNH3K7R4ODLpCDsEmWyiawlw3HjBaib8Mx8OQ/640?wx_fmt=png)
 
-## 5.4. 特殊路径挂载导致的容器逃逸
+### 5.4. 特殊路径挂载导致的容器逃逸
 
 这类的挂载很好理解，当例如宿主机的内的 /, /etc/, /root/.ssh 等目录的写权限被挂载进容器时，在容器内部可以修改宿主机内的 /etc/crontab、/root/.ssh/、/root/.bashrc 等文件执行任意命令，就可以导致容器逃逸。
 
@@ -370,7 +372,7 @@ debugfs -w near
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftatOPnCicAiaV8lXHkvKuPQFT4aUSJicKE5FhfKibxWx3PQVAQAzJpMdxibw/640?wx_fmt=png)
 
-## 5.4.1 Docker in Docker
+### 5.4.1 Docker in Docker
 
 其中一个比较特殊且常见的场景是当宿主机的 /var/run/docker.sock 被挂载容器内的时候，容器内就可以通过 docker.sock 在宿主机里创建任意配置的容器，此时可以理解为可以创建任意权限的进程；当然也可以控制任意正在运行的容器。
 
@@ -396,7 +398,7 @@ https://ssh.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://githu
 
 此时基于 golang 编写简易的利用程序，利用交叉编译编译成无需依赖的单独 bin 文件下载到容器内执行就是经常使用的方法了。
 
-## 5.4.2 攻击挂载了主机 /proc 目录的容器
+### 5.4.2 攻击挂载了主机 /proc 目录的容器
 
 另一个比较有趣的场景就是挂载了主机 /proc 目录的容器，在历史的攻防演练中当我们遇到挂载了主机 /proc 目录的容器，一般都会有其它可以逃逸的特性，如 sys_ptrace 或者 sys_admin 等，但是其实挂载了主机 /proc 目录这个设置本身，就是一个可以逃逸在宿主机执行命令的特性。
 
@@ -436,7 +438,7 @@ e. 当然不能忘记给 exp.sh 赋予可执行权限。
 
 当容器内的 segmentation fault 被触发时，我们就达到了逃逸到宿主机在容器外执行任意代码的目的。
 
-## 5.5. SYS_PTRACE 安全风险
+### 5.5. SYS_PTRACE 安全风险
 
 当 docker 容器设置 --cap-add=SYS_PTRACE 或 Kubernetes PODS 设置 securityContext.capabilities 为 SYS_PTRACE 配置等把 SYS_PTRACE capabilities 权限赋予容器的情况，都可能导致容器逃逸。
 
@@ -452,7 +454,7 @@ e. 当然不能忘记给 exp.sh 赋予可执行权限。
 
 当然，就如上面所述，拥有了该权限就可以在容器内执行 strace 和 ptrace 等工具，若只是一些常见场景的信息收集也不一定需要注入恶意 shellcode 进行逃逸才可以做到。
 
-## 5.6. 利用大权限的 Service Account
+### 5.6. 利用大权限的 Service Account
 
 使用 Kubernetes 做容器编排的话，在 POD 启动时，Kubernetes 会默认为容器挂载一个 Service Account 证书。同时，默认情况下 Kubernetes 会创建一个特有的 Service 用来指向 ApiServer。
 
@@ -488,7 +490,7 @@ Default Service Account
 
 3. 历史上我们遇到很多集群会删除 Kubernetes Default Service，所以需要使用容器内的资产探测手法进行信息收集获取 apiserver 的地址。
 
-## 5.7. CVE-2020-15257 利用
+### 5.7. CVE-2020-15257 利用
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftkxc6w0j4uicMY3jcHMyYhwBHL3cqqVoavpqlOQMQhLBtUEKmCZW6OUQ/640?wx_fmt=png)
 
@@ -504,7 +506,7 @@ https://github.com/cdk-team/CDK/wiki/Exploit:-shim-pwn
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSft66U7coycRmetNGibBpXjwjN6mjYogWazh856zC1Ajmeq34tC2jXdI0Q/640?wx_fmt=png)
 
-## 5.8. runc CVE-2019-5736 和容器组件历史逃逸漏洞综述
+### 5.8. runc CVE-2019-5736 和容器组件历史逃逸漏洞综述
 
 这个由 RUNC 实现而导致的逃逸漏洞太出名了，出名到每一次提及容器安全能力或容器安全研究都会被拿出来当做案例或 DEMO。但不得不说，这里的利用条件在实际的攻防场景里还是过于有限了；实际利用还是需要一些特定的场景才能真的想要去使用和利用它。
 
@@ -520,7 +522,7 @@ https://github.com/cdk-team/CDK/wiki/Exploit:-shim-pwn
 
 至于我们实际遇到的场景可以在 “容器相关组件的历史漏洞” 一章中查看。从攻防角度不得不说的是，这个漏洞的思路和 EXP 过于出名，几乎所有的 HIDS 都已经具备检测能力，甚至对某些 EXP 文件在静态文件规则上做了拉黑，所以大部分情况是使用该方法就等于在一定程度上暴露了行踪，需要谨慎使用。
 
-## 5.9. 内核漏洞提权和逃逸概述
+### 5.9. 内核漏洞提权和逃逸概述
 
 容器共享宿主机内核，因此我们可以使用宿主机的内核漏洞进行容器逃逸，比如通过内核漏洞进入宿主机内核并更改当前容器的 namespace，在历史内核漏洞导致的容器逃逸当中最广为人知的便是脏牛漏洞（CVE-2016-5195）了。
 
@@ -528,7 +530,7 @@ https://github.com/cdk-team/CDK/wiki/Exploit:-shim-pwn
 
 这些漏洞的 POC 和 EXP 都已经公开，且不乏有利用行为，但同时大部分的 EDR 和 HIDS 也对 EXP 的利用具有检测能力，这也是利用内核漏洞进行容器逃逸的痛点之一。
 
-## 5.10. 写 StaticPod 逃逸或权限维持
+### 5.10. 写 StaticPod 逃逸或权限维持
 
 利用 Static Pod 是我们在容器逃逸和远程代码执行场景找到的解决方案，他是 Kubernetes 里的一种特殊的 Pod，由节点上 kubelet 进行管理。在漏洞利用上有以下几点明显的优势：
 
@@ -609,7 +611,7 @@ func (s *sourceFile) extractFromDir(name string) ([]*v1.Pod, error) {
 
 前六个服务的非只读接口我们都曾经在渗透测试里遇到并利用过，都是一旦被控制可以直接获取相应容器、相应节点、集群权限的服务，也是广大公网蠕虫的必争之地。
 
-## 7.1. 组件分工
+### 7.1. 组件分工
 
 各个组件未鉴权所能造成的风险，其实从它们在 Kubernetes 集群环境里所能起到的作用就能很明显的判断出来，如 APIServer 是所有功能的主入口，则控制 APIServer 基本上等同控制集群的所有功能；而 kubelet 是单个节点用于进行容器编排的 Agent，所以控制 kubelet 主要是对单个节点下的容器资源进行控制。
 
@@ -635,7 +637,7 @@ func (s *sourceFile) extractFromDir(name string) ([]*v1.Pod, error) {
 
 另外比较有容器特色的方案就是 Network Policy 的规划和服务网格的使用，能从容器、POD、服务的维度更加优雅的管理和治理容器网络以及集群内流量。这些组件的资料和对应渗透手法，这里我们一一介绍一下:
 
-## 7.2. apiserver
+### 7.2. apiserver
 
 如果想要攻击 apiserver, 下载 kubectl 是必经之路。
 
@@ -663,7 +665,7 @@ curl -LO "https://dl.Kubernetes.io/release/$(curl -L -s https://dl.Kubernetes.io
 
 https://Kubernetes.io/docs/reference/generated/kubectl/kubectl-commands
 
-## 7.3. kubelet
+### 7.3. kubelet
 
 每一个 Node 节点都有一个 kubelet 服务，kubelet 监听了 10250，10248，10255 等端口。
 
@@ -689,7 +691,7 @@ curl -k https://Kubernetes-node-ip:10250/run/// -d “cmd=id” 的方式在任�
 
 由于这里 10250 鉴权当前的 Kubernetes 设计是默认安全的，所以 10255 的开放就可能更加容易在红蓝对抗中起到至关重要的作用。10255 本身为只读端口，虽然开放之后默认不存在鉴权能力，无法直接利用在容器中执行命令，但是可以获取环境变量 ENV、主进程 CMDLINE 等信息，里面包含密码和秘钥等敏感信息的概率是很高的，可以快速帮我们在对抗中打开局面。
 
-## 7.4. dashboard
+### 7.4. dashboard
 
 dashboard 是 Kubernetes 官方推出的控制 Kubernetes 的图形化界面，在 Kubernetes 配置不当导致 dashboard 未授权访问漏洞的情况下，通过 dashboard 我们可以控制整个集群。
 
@@ -729,7 +731,7 @@ dashboard 是 Kubernetes 官方推出的控制 Kubernetes 的图形化界面，�
 
 值得注意的是，为了集群的稳定性和安全性要求，在 Kubernetes 默认设计的情况下 Pod 是不能调度到 master 节点的，但如果用户自行设置关闭了 Master Only 状态，那么我们可以直接在 master 节点新建 Pod 更直接的控制 master node；不过目前各大主流云产商上的 Kubernetes 集群服务，都会默认推荐让 Master 节点由云厂商托管，更加加剧了 Master 节点渗透和控制的难度 。
 
-## 7.5. etcd
+### 7.5. etcd
 
 etcd 被广泛用于存储分布式系统或机器集群数据，其默认监听了 2379 等端口，如果 2379 端口暴露到公网，可能造成敏感信息泄露，本文我们主要讨论 Kubernetes 由于配置错误导致 etcd 未授权访问的情况。Kubernetes 默认使用了 etcd v3 来存储数据，如果我们能够控制 Kubernetes etcd 服务，也就拥有了整个集群的控制权。
 
@@ -745,7 +747,7 @@ etcd 被广泛用于存储分布式系统或机器集群数据，其默认监听
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftLhA7tToh4wYcXDpeico3iaTgcaiaQdiaiajQF2jw0aXc6iaDrGdEb0ibB1epA/640?wx_fmt=png)
 
-## 7.6. docker remote api
+### 7.6. docker remote api
 
 Docker Engine API 是 Docker 提供的基于 HTTP 协议的用于 Docker 客户端与 Docker 守护进程交互的 API，Docker daemon 接收来自 Docker Engine API 的请求并处理，Docker daemon 默认监听 2375 端口且未鉴权，我们可以利用 API 来完成 Docker 客户端能做的所有事情。
 
@@ -763,7 +765,7 @@ Docker daemon 支持三种不同类型的 socket: unix, tcp, fd。默认情况�
 
 检测目标是否存在 docker api 未授权访问漏洞的方式也很简单，访问 http://[host]:[port]/info 路径是否含有 ContainersRunning、DockerRootDir 等关键字。
 
-## 7.7. kubectl proxy
+### 7.7. kubectl proxy
 
 kubectl proxy 这个子命令大家可能遇到比较少，这里单独介绍一下；由于上述几个组件的安全问题较为常见和出名，且在目前开源分支里它们在鉴权这个方面都是默认安全的，所以直接出现问题的可能性较小，企业在内外网也都收敛得不错；此时 kubectl proxy 这个子命令反而是另一个常见且蠕虫利用起来非常简单粗暴的问题。
 
@@ -797,7 +799,7 @@ kubectl proxy 这个子命令大家可能遇到比较少，这里单独介绍一
 
 ## 9. 二次开发所产生的安全问题
 
-## 9.1. 对 Kubernetes API 的请求转发或拼接
+### 9.1. 对 Kubernetes API 的请求转发或拼接
 
 熟悉 Kubernetes 架构的同学可能知道，管理员管理 Kubernetes 无论是使用 kubectl 或 Kubernetes dashboard 的 UI 功能，其实都是间接在和 APIServer 做交互。
 
