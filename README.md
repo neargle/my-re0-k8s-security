@@ -120,7 +120,7 @@ docker -H ${host_docker_sock} run -d -it --name neartest_Kubernetes_hashsubix -v
 
 毕竟从内核角度看容器技术的关键就是 CGroup 和 Namespace，或许应该再加一个 Capabilities。从 CGroup 信息中，不仅可以判断我们是否在容器内，也能很方便判断出当前的容器是否在 Kubernetes 的编排环境中。
 
-毕竟没使用 Kubernetes 的 docker 容器，其 cgroup 信息长这样：
+没使用 Kubernetes 的 docker 容器，其 cgroup 信息长这样：
 
 12:hugetlb:/docker/9df9278580c5fc365cb5b5ee9430acc846cf6e3207df1b02b9e35dec85e86c36
 
@@ -132,6 +132,8 @@ docker -H ${host_docker_sock} run -d -it --name neartest_Kubernetes_hashsubix -v
 
 同类判断当前 shell 环境是否是容器，并采集容器内信息的还有很多，举个不完全的例子：
 
+  
+```
 ps aux
 
 ls -l .dockerenv
@@ -157,7 +159,8 @@ cat /proc/self/mounts
 cat /proc/net/unix
 
 cat /proc/1/mountinfo
-
+```
+  
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftPaEEMDapm7RgLEpRRPibpPezFWy7K4D44qhOs2UgdRENTicibzaCicFC2g/640?wx_fmt=png)
 
 其中 capsh --print 获取到信息是十分重要的，可以打印出当前容器里已有的 Capabilities 权限；历史上，我们曾经为了使用 strace 分析业务进程，而先设法进行容器逃逸忘记看当前容器的 Capabilities 其实已经拥有了 ptrace 权限，绕了一个大弯子。
