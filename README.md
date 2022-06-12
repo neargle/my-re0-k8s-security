@@ -132,7 +132,7 @@ docker -H ${host_docker_sock} run -d -it --name neartest_Kubernetes_hashsubix -v
 
 同类判断当前 shell 环境是否是容器，并采集容器内信息的还有很多，举个不完全的例子：
 
-  
+
 ```
 ps aux
 
@@ -160,7 +160,7 @@ cat /proc/net/unix
 
 cat /proc/1/mountinfo
 ```
-  
+
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftPaEEMDapm7RgLEpRRPibpPezFWy7K4D44qhOs2UgdRENTicibzaCicFC2g/640?wx_fmt=png)
 
 其中 capsh --print 获取到信息是十分重要的，可以打印出当前容器里已有的 Capabilities 权限；历史上，我们曾经为了使用 strace 分析业务进程，而先设法进行容器逃逸忘记看当前容器的 Capabilities 其实已经拥有了 ptrace 权限，绕了一个大弯子。
@@ -203,7 +203,7 @@ kubectl create -f cronjob.yaml -v=8
 
 6. 内网其它服务及端口，主要目标可以设定为 APISERVER、ETCD、Kubelet 等
 
-  
+
 不考虑对抗和安装门槛的话，使用 masscan 和 nmap 等工具在未实行服务网格的容器网络内进行服务发现和端口探测和在传统的 IDC 网络里区别不大；当然，因为 Kubernetes Service 虚拟出来的服务端口默认是不会像容器网络一样有一个虚拟的 veth 网络接口的，所以即使 Kubernetes Service 可以用 IP:PORT 的形式访问到，但是是没办法以 ICMP 协议做 Service 的 IP 发现（Kubernetes Service 的 IP 探测意义也不大）。
 
 另如果 HIDS、NIDS 在解析扫描请求时，没有针对 Kubernetes 的 IPIP Tunnle 做进一步的解析，可能产生一定的漏报。
@@ -322,11 +322,11 @@ https://github.com/cdk-team/CDK/wiki/Exploit:-lxcfs-rw
 
 上面提到了 privileged 配置可以理解为一个很大的权限集合，可以直接 mount device 并不是它唯一的权限和利用手法，另外一个比较出名的手法就是利用 cgroup release_agent 进行容器逃逸以在宿主机执行命令，这个手法同样可以作用于 sys_admin 的容器。
 
-shell 利用脚本如下（bash 脚本参考： https://github.com/neargle/cloud_native_security_test_case/blob/master/privileged/1-host-ps.sh）：
+shell 利用脚本如下（bash 脚本参考： [https://github.com/neargle/cloud_native_security_test_case/blob/master/privileged/1-host-ps.sh](https://github.com/neargle/cloud_native_security_test_case/blob/master/privileged/1-host-ps.sh)）：
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftEWoZ2qyfQR8GX93YnMXf5adbPsONoOGjWgdznasxJdciaib9PNHZVrDQ/640?wx_fmt=png)
 
-  
+
 输出示例：  
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftd0OAOT3fzaDQCAlAaIRQSgEWIol1sKbUxz1Ttg9BxcCMcpLcw46jcA/640?wx_fmt=png)
@@ -415,19 +415,17 @@ docker run -v /proc:/host_proc --rm -it ubuntu bash
 
 a. 首先我们需要利用在 release_agent 中提及的方法从 mount 信息中找出宿主机内对应当前容器内部文件结构的路径。
 
-sed -n 's/.*\perdir=\([^,]*\).*/\1/p' /etc/mtab
+`sed -n 's/.*\perdir=\([^,]*\).*/\1/p' /etc/mtab`
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftR3jLLNribmw1DuJ0NO9kjn0fYslX59rhRdZVYMNl1mKYIS8M5gUkbdw/640?wx_fmt=png)
 
-b. 此时我们在容器内的 /exp.sh 就对应了宿主机的 /var/lib/docker/overlay2/a1a1e60a9967d6497f22f5df21b185708403e2af22eab44cfc2de05ff8ae115f/diff/exp.sh 文件。
+b. 此时我们在容器内的 /exp.sh 就对应了宿主机的 `/var/lib/docker/overlay2/a1a1e60a9967d6497f22f5df21b185708403e2af22eab44cfc2de05ff8ae115f/diff/exp.sh` 文件。
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftH6nUncxl6ibtrUumbDmWNOdnibrBCJFwpf3HrTFZ9xFhhvkRa4BCgCjA/640?wx_fmt=png)
 
 c. 因为宿主机内的 /proc 文件被挂载到了容器内的 /host_proc 目录，所以我们修改 /host_proc/sys/kernel/core_pattern 文件以达到修改宿主机 /proc/sys/kernel/core_pattern 的目的。
 
-echo -e
-
-"|/var/lib/docker/overlay2/a1a1e60a9967d6497f22f5df21b185708403e2af22eab44cfc2de05ff8ae115f/diff/exp.sh \rcore" > /host_proc/sys/kernel/core_pattern
+`echo -e "|/var/lib/docker/overlay2/a1a1e60a9967d6497f22f5df21b185708403e2af22eab44cfc2de05ff8ae115f/diff/exp.sh \rcore" > /host_proc/sys/kernel/core_pattern`
 
 d. 此时我们还需要一个程序在容器里执行并触发 segmentation fault 使植入的 payload 即 exp.sh 在宿主机执行。
 
@@ -610,7 +608,7 @@ func (s *sourceFile) extractFromDir(name string) ([]*v1.Pod, error) {
 10.  weave: 6781, 6782, 6783
     
 11.  kubeflow-dashboard: 8080
-    
+
 
 前六个服务的非只读接口我们都曾经在渗透测试里遇到并利用过，都是一旦被控制可以直接获取相应容器、相应节点、集群权限的服务，也是广大公网蠕虫的必争之地。
 
