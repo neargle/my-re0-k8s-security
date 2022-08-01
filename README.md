@@ -175,9 +175,9 @@ cat /proc/1/mountinfo
 
 其他如 mount, lsof 等命令也类似。
 
-另外一个比较常见就是 kubectl 命令的功能复现，很多情况下我们虽然获得了可以访问 APIServer 的网络权限和证书（又或者不需要证书）拥有了控制集群资源的权限，却无法下载或安装一个 kubectl 程序便捷的和 APIServer 通信，此时我们可以配置 kubectl 的 logging 登机，记录本地 kubectl 和测试 APIServer 的请求详情，并将相同的请求包发送给目标的 APIServer 以实现相同的效果。
+另外一个比较常见就是 kubectl 命令的功能复现，很多情况下我们虽然获得了可以访问 APIServer 的网络权限和证书（又或者不需要证书）拥有了控制集群资源的权限，却无法下载或安装一个 kubectl 程序便捷的和 APIServer 通信，此时我们可以配置 kubectl 的 logging 登记，记录本地 kubectl 和测试 APIServer 的请求详情，并将相同的请求包发送给目标的 APIServer 以实现相同的效果。
 
-kubectl create -f cronjob.yaml -v=8
+`kubectl create -f cronjob.yaml -v=8`
 
 如果需要更详细的信息，也可以提高 logging level, 例如 kubectl -v=10 等，其他 Kubernetes 组件也能达到相同的目的。
 
