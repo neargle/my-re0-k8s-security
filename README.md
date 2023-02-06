@@ -589,7 +589,7 @@ func (s *sourceFile) extractFromDir(name string) ([]*v1.Pod, error) {
 
 1.  kube-apiserver: 6443, 8080
     
-2.  kubectl proxy: 8080, 8081
+2.  kubectl proxy: 8080, 8001
     
 3.  kubelet: 10250, 10255, 4149
     
