@@ -142,7 +142,7 @@ capsh --print
 
 env | grep KUBE
 
-ls -l /run/secrets/Kubernetes.io/
+ls -l /run/secrets/kubernetes.io/
 
 mount
 
@@ -664,7 +664,7 @@ curl -LO "https://dl.Kubernetes.io/release/$(curl -L -s https://dl.Kubernetes.io
 
 至于如何通过 apiserver 进行持续渗透和控制，参考 kubectl 的官方文档是最好的：
 
-https://Kubernetes.io/docs/reference/generated/kubectl/kubectl-commands
+https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands
 
 ### 7.3. kubelet
 
@@ -682,7 +682,7 @@ https://Kubernetes.io/docs/reference/generated/kubectl/kubectl-commands
 
 之后再通过
 
-curl -k https://Kubernetes-node-ip:10250/run/// -d “cmd=id” 的方式在任意容器里执行命令
+curl -k https://kubernetes-node-ip:10250/run/// -d “cmd=id” 的方式在任意容器里执行命令
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftzyicibzfCRmZZVmRdbO0Aibn7LI4132GPk73g7pwkqepME7ekBaZEw7tQ/640?wx_fmt=png)
 
@@ -736,7 +736,7 @@ dashboard 是 Kubernetes 官方推出的控制 Kubernetes 的图形化界面，�
 
 etcd 被广泛用于存储分布式系统或机器集群数据，其默认监听了 2379 等端口，如果 2379 端口暴露到公网，可能造成敏感信息泄露，本文我们主要讨论 Kubernetes 由于配置错误导致 etcd 未授权访问的情况。Kubernetes 默认使用了 etcd v3 来存储数据，如果我们能够控制 Kubernetes etcd 服务，也就拥有了整个集群的控制权。
 
-在 Kubernetes 中用户可以通过配置 / etc/Kubernetes/manifests/etcd.yaml 更改 etcd pod 相关的配置，倘若管理员通过修改配置将 etcd 监听的 host 修改为 0.0.0.0，则通过 ectd 获取 Kubernetes 的认证鉴权 token 用于控制集群就是自然而然的思路了，方式如下：
+在 Kubernetes 中用户可以通过配置 /etc/kubernetes/manifests/etcd.yaml 更改 etcd pod 相关的配置，倘若管理员通过修改配置将 etcd 监听的 host 修改为 0.0.0.0，则通过 ectd 获取 Kubernetes 的认证鉴权 token 用于控制集群就是自然而然的思路了，方式如下：
 
 首先读取用于访问 apiserver 的 token
 
@@ -1007,7 +1007,7 @@ APISIX 提供了 REST Admin API 功能，用户可以使用 REST Admin API 来�
 
 官方文档
 
-https://Kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ 里也谈及了 CronJob 和 CronTab 的对比， 这个技术也确实可以和 CronTab 一样一定程度上可以满足持久化的场景。
+https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ 里也谈及了 CronJob 和 CronTab 的对比， 这个技术也确实可以和 CronTab 一样一定程度上可以满足持久化的场景。
 
 这里有一个我们预研时使用的  CronJob 配置：
 
@@ -1035,14 +1035,14 @@ https://Kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/ 里也谈�
 4.  https://www.cncf.io/blog/2017/04/26/service-mesh-critical-component-cloud-native-stack/
 5.  https://github.com/lxc/lxcfs
 6.  https://github.com/cdr/code-server
-7.  https://Kubernetes.io/docs/reference/generated/kubectl/kubectl-commands
+7.  https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands
 8.  https://thehackernews.com/2021/01/new-docker-container-escape-bug-affects.html
-9.  https://medium.com/jorgeacetozi/Kubernetes-master-components-etcd-api-server-controller-manager-and-scheduler-3a0179fc8186
+9.  https://medium.com/jorgeacetozi/kubernetes-master-components-etcd-api-server-controller-manager-and-scheduler-3a0179fc8186
 10.  https://wohin.me/rong-qi-tao-yi-gong-fang-xi-lie-yi-tao-yi-ji-zhu-gai-lan/#4-2-procfs-
 11.  https://security.tencent.com/index.php/announcement/msg/193
 12.  https://www.freebuf.com/vuls/196993.html
-13.  https://Kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/
-14.  https://Kubernetes.io/zh/docs/reference/command-line-tools-reference/kubelet/
+13.  https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/
+14.  https://kubernetes.io/zh/docs/reference/command-line-tools-reference/kubelet/
 15.  https://www.cdxy.me/?p=827
 16.  https://medium.com/jorgeacetozi/kubernetes-master-components-etcd-api-server-controller-manager-and-scheduler-3a0179fc8186
 17.  https://github.com/neargle/CVE-2018-6574-POC
