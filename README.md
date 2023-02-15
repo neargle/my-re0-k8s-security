@@ -104,7 +104,7 @@ docker -H ${host_docker_sock} run -d -it --name neartest_Kubernetes_hashsubix -v
 
 当然上述大部分配置都会被多租户集群下的 Kubernetes Security Policy 所拦截，且如果目前主机上的 HIDS 有一定容器安全能力的话，这类配置的容器创建行为也比较容易会被标记为异常行为。
 
-不过，显然我们在真实的对抗中如果只是想达到执行 strace 抓取 sshd 的目的，配置可以更加简化一点，只需添加 SYS_PTRACE 的 capabilities 即可，我在演习中也正是这么做的。
+不过，显然我们在真实的对抗中如果只是想达到执行 strace 抓取 sshd 的目的，配置可以更加简化一点，只需添加 SYS_PTRACE 的 capabilities 即可，如果需要抓取容器外的进程，可再添加一个 hostpid 。
 
 因为具有 SYS_PTRACE 权限的容器并且进行 kubectl exec 的行为在实际的研发运维流程中非常常见，是 HIDS 比较不容易察觉的类业务型操作；另外也可以寻找节点上已有该配置的容器和 POD 进行控制，同样是不易被防御团队所察觉的。
 
@@ -163,7 +163,7 @@ cat /proc/1/mountinfo
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftPaEEMDapm7RgLEpRRPibpPezFWy7K4D44qhOs2UgdRENTicibzaCicFC2g/640?wx_fmt=png)
 
-其中 capsh --print 获取到信息是十分重要的，可以打印出当前容器里已有的 Capabilities 权限；历史上，我们曾经为了使用 strace 分析业务进程，而先设法进行容器逃逸忘记看当前容器的 Capabilities 其实已经拥有了 ptrace 权限，绕了一个大弯子。
+其中 capsh --print 获取到信息是十分重要的，可以打印出当前容器里已有的 Capabilities 权限。
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftcgCLWayVj5MuKrHtibFOsoIsWrDc7Onr5cTbzIPXpafkq2hjnAv16Jg/640?wx_fmt=png)
 
@@ -244,9 +244,7 @@ cat /proc/1/mountinfo
 
 7. remount and rewrite cgroup
 
-8. create ptrace cap container  
-
-9. websocket/sock shell + volumeMounts: /path
+8. websocket/sock shell + volumeMounts: /path
 
 我们来一一看一下利用场景和方法：  
 
@@ -441,11 +439,13 @@ e. 当然不能忘记给 exp.sh 赋予可执行权限。
 
 ### 5.5. SYS_PTRACE 安全风险
 
-当 docker 容器设置 --cap-add=SYS_PTRACE 或 Kubernetes PODS 设置 securityContext.capabilities 为 SYS_PTRACE 配置等把 SYS_PTRACE capabilities 权限赋予容器的情况，都可能导致容器逃逸。
+当 docker 容器设置 --cap-add=SYS_PTRACE 或 Kubernetes PODS 设置 securityContext.capabilities 为 SYS_PTRACE 配置等把 SYS_PTRACE capabilities 权限赋予容器的情况，如果该容器也具备 hostpid 配置，那就可能导致容器逃逸。
+
+可导致容器逃逸风险的 capabilities 权限还有很多，这里就不一一介绍啦。
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftiatm1LG35dC04AKvK7vbmJibx5iciaena0ptqib9W2xOY9cVTVShyFmBMFQ/640?wx_fmt=png)
 
-这个场景很常见，因为无论是不是线上环境，业务进行灾难重试和程序调试都是没办法避免的，所以容器经常被设置 ptrace 权限。
+这个场景很常见，因为无论是不是线上环境，业务进行故障重试和程序调试都是没办法避免的，所以容器经常被设置 ptrace 权限。
 
 使用 capsh --print 可以判断当前容器是否附加了 ptrace capabilities。
 
