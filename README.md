@@ -457,9 +457,9 @@ e. 当然不能忘记给 exp.sh 赋予可执行权限。
 
 ### 5.6. 利用大权限的 Service Account
 
-使用 Kubernetes 做容器编排的话，在 POD 启动时，Kubernetes 会默认为容器挂载一个 Service Account 证书。同时，默认情况下 Kubernetes 会创建一个特有的 Service 用来指向 ApiServer。
+在 POD 启动时，Kubernetes 会默认为容器挂载一个 Service Account 的 token 和证书。同时，默认情况下 Kubernetes 会创建一个名为 kubernetes.default 的 Service 用来指向 ApiServer。
 
-有了这两个条件，我们就拥有了在容器内直接和 APIServer 通信和交互的方式。
+有了上述两个条件，我们就拥有了在容器内和 APIServer 通信和交互的方式。
 
 Kubernetes Default Service
 
@@ -471,25 +471,19 @@ Default Service Account
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSft7TibDhibGHJ9Hrb2uIPSCEGiaUgacRkL4THkcThMyGmN2gPDUADeJLBzQ/640?wx_fmt=png)
 
-默认情况下，这个 Service Account 的证书和 token 虽然可以用于和 Kubernetes Default Service 的 APIServer 通信，但是是没有权限进行利用的。
+默认情况下，这个 Service Account 的证书和 token 虽然可以用于和 APIServer 通信，但是是没有权限进行利用的。
 
-但是集群管理员可以为 Service Account 赋予权限：
+但是集群管理员可以为 Service Account 赋予权限，例如使用 cluster-admin 的 clusterrolebinding ：
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftKYhULXklPpLiciaR5icMSuVehOY3FTUrkfIyCtvmj9IoiclZkZt5eW5gZA/640?wx_fmt=png)
 
-此时直接在容器里执行 kubectl 就可以集群管理员权限管理容器集群。
+此时，直接在容器里执行 kubectl 就可以集群管理员权限管理容器集群。
 
 ![图片](https://mmbiz.qpic.cn/mmbiz_png/JMH1pEQ7qP5lIovB8NLL2Anic3icVltSftia4aojurXia3vykNrLmzUp1LxDKqalKT9wofHFks3F7f3v9OAjiaKMm4Q/640?wx_fmt=png)
 
-因此获取一个拥有绑定了 ClusterRole/cluster-admin Service Account 的 POD，其实就等于拥有了集群管理员的权限。
+因此获取一个拥有挂载了 ClusterRole/cluster-admin 的 Service Account 的容器，其实就等于拥有了集群管理员的权限。
 
-实际攻防演练利用过程中，有几个坑点：
-
-1. 老版本的 kubectl 不会自动寻找和使用 Service Account 需要用 kubectl config set-cluster cfc 进行绑定或下载一个新版本的 kubectl 二进制程序；
-
-2. 如果当前用户的目录下配置了 kubeconfig 即使是错误的，也会使用 kubeconfig 的配置去访问不会默认使用 Service Account ；
-
-3. 历史上我们遇到很多集群会删除 Kubernetes Default Service，所以需要使用容器内的资产探测手法进行信息收集获取 apiserver 的地址。
+和这个核心相关的特性就是 **RBAC**： cluster-admin 虽然权限最大，但并非唯一能控制整个集群的权限，很多权限也能间接提权为 cluster-admin 权限。
 
 ### 5.7. CVE-2020-15257 利用
 
